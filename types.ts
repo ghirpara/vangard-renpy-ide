@@ -643,6 +643,10 @@ export interface ProjectSettings {
   draftingMode: boolean;
   openTabs: EditorTab[];
   activeTabId: string;
+  splitLayout?: 'none' | 'right' | 'bottom';
+  splitPrimarySize?: number;
+  secondaryOpenTabs?: EditorTab[];
+  secondaryActiveTabId?: string;
   stickyNotes?: StickyNote[];
   characterProfiles?: Record<string, string>;
   punchlistMetadata?: Record<string, PunchlistMetadata>;
