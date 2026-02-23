@@ -134,6 +134,17 @@ const ImageEditorView: React.FC<ImageEditorViewProps> = ({ image, allImages, met
     };
   }, [dimensions, effectiveZoom]);
 
+  // Compute padding so the image is centered when smaller than the viewport,
+  // or has a fixed 16px margin when larger — avoids the flex-centering negative-overflow bug.
+  const imgPad = useMemo(() => {
+    const min = 16;
+    if (!imageDisplaySize || !containerSize) return { left: min, top: min };
+    return {
+        left: imageDisplaySize.width  > containerSize.w ? min : Math.floor((containerSize.w - imageDisplaySize.width)  / 2),
+        top:  imageDisplaySize.height > containerSize.h ? min : Math.floor((containerSize.h - imageDisplaySize.height) / 2),
+    };
+  }, [imageDisplaySize, containerSize]);
+
   // Drag-to-pan handlers
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -244,12 +255,26 @@ const ImageEditorView: React.FC<ImageEditorViewProps> = ({ image, allImages, met
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
         >
-          {/* Inner centering wrapper — always at least as large as viewport */}
-          <div className="min-w-full min-h-full flex items-center justify-center p-4">
+          {/* Inner wrapper — explicit size so scroll content starts at left:0,
+               giving equal scroll access to both left and right edges */}
+          <div
+            style={{
+              position: 'relative',
+              minWidth: '100%',
+              minHeight: '100%',
+              width: imageDisplaySize ? imageDisplaySize.width  + imgPad.left * 2 : undefined,
+              height: imageDisplaySize ? imageDisplaySize.height + imgPad.top  * 2 : undefined,
+            }}
+          >
             {imageDisplaySize ? (
               <div
-                className="relative flex-none"
-                style={{ width: imageDisplaySize.width, height: imageDisplaySize.height }}
+                style={{
+                  position: 'absolute',
+                  left: imgPad.left,
+                  top: imgPad.top,
+                  width: imageDisplaySize.width,
+                  height: imageDisplaySize.height,
+                }}
               >
                 {/* Onion Skin Layer */}
                 {onionSkinImage && showOnionSkin && (
@@ -266,17 +291,19 @@ const ImageEditorView: React.FC<ImageEditorViewProps> = ({ image, allImages, met
                     src={image.dataUrl}
                     alt={image.fileName}
                     draggable={false}
-                    className="w-full h-full object-contain block shadow-lg relative z-0"
+                    className="w-full h-full object-contain block shadow-lg"
                 />
               </div>
             ) : (
-              // Fallback while dimensions load
-              <img
-                src={image.dataUrl}
-                alt={image.fileName}
-                draggable={false}
-                className="max-w-full max-h-full object-contain block shadow-lg"
-              />
+              // Fallback while dimensions load — brief flash, flex centering fine here
+              <div className="absolute inset-0 flex items-center justify-center p-4">
+                <img
+                  src={image.dataUrl}
+                  alt={image.fileName}
+                  draggable={false}
+                  className="max-w-full max-h-full object-contain block shadow-lg"
+                />
+              </div>
             )}
           </div>
         </div>
