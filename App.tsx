@@ -1984,12 +1984,21 @@ const App: React.FC = () => {
   // --- Split Pane Management ---
   const handleCreateSplit = useCallback((direction: 'right' | 'bottom') => {
     if (splitLayout !== 'none') return;
-    setSecondaryOpenTabs([{ id: 'canvas', type: 'canvas' }]);
-    setSecondaryActiveTabId('canvas');
+    const activeTab = openTabs.find(t => t.id === activeTabId);
+    if (!activeTab) return;
+    // Move the active tab to secondary so canvas/route-canvas are never duplicated across both panes
+    const remaining = openTabs.filter(t => t.id !== activeTabId);
+    setOpenTabs(remaining);
+    if (remaining.length > 0) {
+      const fallback = remaining.find(t => t.type === 'canvas') ?? remaining[0];
+      setActiveTabId(fallback.id);
+    }
+    setSecondaryOpenTabs([activeTab]);
+    setSecondaryActiveTabId(activeTab.id);
     setSplitLayout(direction);
     setSplitPrimarySize(direction === 'right' ? 600 : 400);
     setActivePaneId('secondary');
-  }, [splitLayout]);
+  }, [splitLayout, openTabs, activeTabId]);
 
   const handleOpenInSplit = useCallback((tabId: string, direction: 'right' | 'bottom') => {
     const tab = openTabs.find(t => t.id === tabId);
