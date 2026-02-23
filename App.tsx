@@ -429,6 +429,7 @@ const App: React.FC = () => {
   const [centerOnBlockRequest, setCenterOnBlockRequest] = useState<{ blockId: string, key: number } | null>(null);
   const [flashBlockRequest, setFlashBlockRequest] = useState<{ blockId: string, key: number } | null>(null);
   const [canvasFilters, setCanvasFilters] = useState({ story: true, screens: true, config: false, notes: true, minimap: true });
+  const [editorCursorPosition, setEditorCursorPosition] = useState<{ line: number; column: number } | null>(null);
   const [hoverHighlightIds, setHoverHighlightIds] = useState<Set<string> | null>(null);
 
   // --- State: Route Canvas ---
@@ -2571,6 +2572,7 @@ const App: React.FC = () => {
         availableModels={AVAILABLE_MODELS} selectedModel={projectSettings.selectedModel} addToast={addToast}
         onEditorMount={(id, editor) => editorInstances.current.set(id, editor)}
         onEditorUnmount={(id) => { const editor = editorInstances.current.get(id); if (editor) { const block = blocksRef.current.find(b => b.id === id); if (block && editor.getValue() !== block.content) { syncEditorToStateAndMarkDirty(id, editor.getValue()); } } editorInstances.current.delete(id); }}
+        onCursorPositionChange={setEditorCursorPosition}
         draftingMode={projectSettings.draftingMode} existingImageTags={existingImageTags} existingAudioPaths={existingAudioPaths}
       />;
     }
@@ -2867,6 +2869,12 @@ const App: React.FC = () => {
               statusMessage={statusBarMessage}
               version={APP_VERSION}
               build={BUILD_NUMBER}
+              cursorPosition={(() => {
+                const focusedTabs = activePaneId === 'primary' ? openTabs : secondaryOpenTabs;
+                const focusedActiveId = activePaneId === 'primary' ? activeTabId : secondaryActiveTabId;
+                const focusedTab = focusedTabs.find(t => t.id === focusedActiveId);
+                return focusedTab?.type === 'editor' ? editorCursorPosition : null;
+              })()}
           />
 
         </div>

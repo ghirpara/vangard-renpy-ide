@@ -99,34 +99,47 @@ const VariableManager: React.FC<VariableManagerProps> = ({ analysisResult, onAdd
         setMode('list');
     };
 
-    const VariableList: React.FC<{ title: string; vars: Variable[] }> = ({ title, vars }) => (
-        <div>
-            <h4 className="font-semibold text-gray-500 dark:text-gray-400 text-sm mt-4 mb-2">{title}</h4>
-            <ul className="space-y-2">
-                {vars.map(variable => (
-                    <li
-                      key={variable.name}
-                      className="p-2 rounded-md bg-gray-50 dark:bg-gray-700/50 flex items-center justify-between"
-                      onMouseEnter={() => onHoverHighlightStart(variable.name, 'variable')}
-                      onMouseLeave={onHoverHighlightEnd}
-                    >
-                        <div className="flex-grow min-w-0">
-                            <p className="font-semibold font-mono text-sm truncate" title={variable.name}>{variable.name}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate" title={`= ${variable.initialValue}`}>
-                                = {variable.initialValue}
-                            </p>
-                        </div>
-                        <div className="flex items-center space-x-1 flex-shrink-0 pl-2">
-                            <button onClick={() => onFindUsages(variable.name)} title="Find Usages" className="p-1 text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 rounded">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                            </button>
-                        </div>
-                    </li>
-                ))}
-                 {vars.length === 0 && <p className="text-xs text-gray-400 dark:text-gray-500 pl-1">None found.</p>}
-            </ul>
-        </div>
-    );
+    const VariableList: React.FC<{ title: string; vars: Variable[] }> = ({ title, vars }) => {
+        const [collapsed, setCollapsed] = useState(false);
+        return (
+            <div className="mt-4">
+                <button
+                    onClick={() => setCollapsed(c => !c)}
+                    className="flex items-center gap-1 w-full font-semibold text-gray-500 dark:text-gray-400 text-sm mb-2 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                >
+                    <svg className={`w-3 h-3 flex-none transition-transform ${collapsed ? '-rotate-90' : ''}`} viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4L6 8L10 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    {title} ({vars.length})
+                </button>
+                {!collapsed && (
+                    <ul className="space-y-2">
+                        {vars.map(variable => (
+                            <li
+                              key={variable.name}
+                              className="p-2 rounded-md bg-gray-50 dark:bg-gray-700/50 flex items-center justify-between"
+                              onMouseEnter={() => onHoverHighlightStart(variable.name, 'variable')}
+                              onMouseLeave={onHoverHighlightEnd}
+                            >
+                                <div className="flex-grow min-w-0">
+                                    <p className="font-semibold font-mono text-sm truncate" title={variable.name}>{variable.name}</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate" title={`= ${variable.initialValue}`}>
+                                        = {variable.initialValue}
+                                    </p>
+                                </div>
+                                <div className="flex items-center space-x-1 flex-shrink-0 pl-2">
+                                    <button onClick={() => onFindUsages(variable.name)} title="Find Usages" className="p-1 text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 rounded">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                    </button>
+                                </div>
+                            </li>
+                        ))}
+                        {vars.length === 0 && <p className="text-xs text-gray-400 dark:text-gray-500 pl-1">None found.</p>}
+                    </ul>
+                )}
+            </div>
+        );
+    };
     
     return (
         <>
