@@ -428,7 +428,7 @@ const App: React.FC = () => {
   const [findUsagesHighlightIds, setFindUsagesHighlightIds] = useState<Set<string> | null>(null);
   const [centerOnBlockRequest, setCenterOnBlockRequest] = useState<{ blockId: string, key: number } | null>(null);
   const [flashBlockRequest, setFlashBlockRequest] = useState<{ blockId: string, key: number } | null>(null);
-  const [canvasFilters, setCanvasFilters] = useState({ story: true, screens: true, config: false, notes: true });
+  const [canvasFilters, setCanvasFilters] = useState({ story: true, screens: true, config: false, notes: true, minimap: true });
   const [hoverHighlightIds, setHoverHighlightIds] = useState<Set<string> | null>(null);
 
   // --- State: Route Canvas ---
@@ -452,6 +452,8 @@ const App: React.FC = () => {
   
   // --- Refs ---
   const editorInstances = useRef<Map<string, monaco.editor.IStandaloneCodeEditor>>(new Map());
+  const primaryTabBarRef = useRef<HTMLDivElement>(null);
+  const secondaryTabBarRef = useRef<HTMLDivElement>(null);
   const initialLayoutNeeded = useRef(false);
 
   // --- Utility Functions ---
@@ -2607,45 +2609,67 @@ const App: React.FC = () => {
     return null;
   };
 
-  const renderTabBar = (tabs: EditorTab[], activeId: string, paneId: 'primary' | 'secondary') => (
-    <div className={`flex-none flex bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 overflow-x-auto no-scrollbar ${splitLayout !== 'none' && activePaneId === paneId ? 'border-t-2 border-t-indigo-500' : ''}`}>
-      {tabs.map(tab => (
-        <div
-          key={tab.id}
-          className={`flex items-center px-3 py-2 text-sm border-r border-gray-200 dark:border-gray-700 cursor-pointer min-w-[100px] max-w-[200px] group ${activeId === tab.id ? 'bg-white dark:bg-gray-900 font-semibold' : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
-          onClick={() => handleSwitchTab(tab.id, paneId)}
-          draggable
-          onDragStart={(e) => handleTabDragStart(e, tab.id, paneId)}
-          onDragOver={(e) => handleTabDragOver(e, tab.id)}
-          onDrop={(e) => handleTabDrop(e, tab.id, paneId)}
-          onContextMenu={(e) => handleTabContextMenu(e, tab.id, paneId)}
+  const renderTabBar = (tabs: EditorTab[], activeId: string, paneId: 'primary' | 'secondary', scrollRef: React.RefObject<HTMLDivElement>) => (
+    <div className={`flex-none flex items-center bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 ${splitLayout !== 'none' && activePaneId === paneId ? 'border-t-2 border-t-indigo-500' : ''}`}>
+      {/* Scrollable tab strip */}
+      <div ref={scrollRef} className="flex flex-1 overflow-x-auto no-scrollbar min-w-0">
+        {tabs.map(tab => (
+          <div
+            key={tab.id}
+            className={`flex items-center px-3 py-2 text-sm border-r border-gray-200 dark:border-gray-700 cursor-pointer min-w-[100px] max-w-[200px] flex-none group ${activeId === tab.id ? 'bg-white dark:bg-gray-900 font-semibold' : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
+            onClick={() => handleSwitchTab(tab.id, paneId)}
+            draggable
+            onDragStart={(e) => handleTabDragStart(e, tab.id, paneId)}
+            onDragOver={(e) => handleTabDragOver(e, tab.id)}
+            onDrop={(e) => handleTabDrop(e, tab.id, paneId)}
+            onContextMenu={(e) => handleTabContextMenu(e, tab.id, paneId)}
+          >
+            <span className="truncate flex-grow">{getTabLabel(tab)}</span>
+            {tab.id !== 'canvas' && (
+              <button onClick={(e) => handleCloseTab(tab.id, paneId, e)} className="ml-2 opacity-0 group-hover:opacity-100 hover:text-red-500 rounded-full p-0.5">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+              </button>
+            )}
+            {tab.blockId && (dirtyBlockIds.has(tab.blockId) || dirtyEditors.has(tab.blockId)) && <div className="w-2 h-2 ml-2 bg-blue-500 rounded-full flex-none" />}
+          </div>
+        ))}
+      </div>
+      {/* Pinned right actions */}
+      <div className="flex items-center flex-none border-l border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => scrollRef.current?.scrollBy({ left: -150, behavior: 'smooth' })}
+          title="Scroll tabs left"
+          className="px-1 py-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
         >
-          <span className="truncate flex-grow">{getTabLabel(tab)}</span>
-          {tab.id !== 'canvas' && (
-            <button onClick={(e) => handleCloseTab(tab.id, paneId, e)} className="ml-2 opacity-0 group-hover:opacity-100 hover:text-red-500 rounded-full p-0.5">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+        <button
+          onClick={() => scrollRef.current?.scrollBy({ left: 150, behavior: 'smooth' })}
+          title="Scroll tabs right"
+          className="px-1 py-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M4.5 2L8.5 6L4.5 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+        {paneId === 'primary' && splitLayout === 'none' && (
+          <>
+            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-0.5" />
+            <button onClick={() => handleCreateSplit('right')} title="Split Right" className="p-1 rounded text-gray-400 hover:text-indigo-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="6" height="12" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="2" width="6" height="12" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
             </button>
-          )}
-          {tab.blockId && (dirtyBlockIds.has(tab.blockId) || dirtyEditors.has(tab.blockId)) && <div className="w-2 h-2 ml-2 bg-blue-500 rounded-full flex-none" />}
-        </div>
-      ))}
-      {paneId === 'primary' && splitLayout === 'none' && (
-        <div className="ml-auto flex items-center px-2 gap-0.5 flex-none">
-          <button onClick={() => handleCreateSplit('right')} title="Split Right" className="p-1 rounded text-gray-400 hover:text-indigo-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="6" height="12" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="2" width="6" height="12" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
-          </button>
-          <button onClick={() => handleCreateSplit('bottom')} title="Split Below" className="p-1 rounded text-gray-400 hover:text-indigo-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><rect x="2" y="1" width="12" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="9" width="12" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
-          </button>
-        </div>
-      )}
-      {paneId === 'secondary' && (
-        <div className="ml-auto flex items-center px-2 flex-none">
-          <button onClick={handleCloseSecondaryPane} title="Close Pane" className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-          </button>
-        </div>
-      )}
+            <button onClick={() => handleCreateSplit('bottom')} title="Split Below" className="p-1 rounded text-gray-400 hover:text-indigo-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><rect x="2" y="1" width="12" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="9" width="12" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
+            </button>
+          </>
+        )}
+        {paneId === 'secondary' && (
+          <>
+            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-0.5" />
+            <button onClick={handleCloseSecondaryPane} title="Close Pane" className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 
@@ -2784,7 +2808,7 @@ const App: React.FC = () => {
               style={splitLayout === 'right' ? { width: splitPrimarySize, flexShrink: 0 } : splitLayout === 'bottom' ? { height: splitPrimarySize, flexShrink: 0 } : { flex: 1 }}
               onClick={() => activePaneId !== 'primary' && setActivePaneId('primary')}
             >
-              {renderTabBar(openTabs, activeTabId, 'primary')}
+              {renderTabBar(openTabs, activeTabId, 'primary', primaryTabBarRef)}
               <div className="flex-grow relative overflow-hidden">
                 {openTabs.map(tab => (
                     <div key={tab.id} className="w-full h-full absolute" style={{ visibility: tab.id === activeTabId ? 'visible' : 'hidden' }}>
@@ -2808,7 +2832,7 @@ const App: React.FC = () => {
                 className="flex-1 flex flex-col min-w-0 min-h-0"
                 onClick={() => activePaneId !== 'secondary' && setActivePaneId('secondary')}
               >
-                {renderTabBar(secondaryOpenTabs, secondaryActiveTabId, 'secondary')}
+                {renderTabBar(secondaryOpenTabs, secondaryActiveTabId, 'secondary', secondaryTabBarRef)}
                 <div className="flex-grow relative overflow-hidden">
                   {secondaryOpenTabs.map(tab => (
                     <div key={tab.id} className="w-full h-full absolute" style={{ visibility: tab.id === secondaryActiveTabId ? 'visible' : 'hidden' }}>
