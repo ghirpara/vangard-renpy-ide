@@ -29,6 +29,7 @@ interface EditorViewProps {
   addToast: (message: string, type: ToastMessage['type']) => void;
   onEditorMount: (blockId: string, editor: monaco.editor.IStandaloneCodeEditor) => void;
   onEditorUnmount: (blockId: string) => void;
+  onCursorPositionChange?: (pos: { line: number; column: number } | null) => void;
   draftingMode: boolean;
   existingImageTags: Set<string>;
   existingAudioPaths: Set<string>;
@@ -82,6 +83,7 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
     addToast,
     onEditorMount,
     onEditorUnmount,
+    onCursorPositionChange,
     draftingMode,
     existingImageTags,
     existingAudioPaths
@@ -104,7 +106,8 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
   const onSwitchFocusBlockRef = useRef(onSwitchFocusBlock);
   const analysisResultRef = useRef(analysisResult);
   const onEditorUnmountRef = useRef(onEditorUnmount);
-  
+  const onCursorPositionChangeRef = useRef(onCursorPositionChange);
+
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange;
     onTriggerSaveRef.current = onTriggerSave;
@@ -112,7 +115,8 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
     onSwitchFocusBlockRef.current = onSwitchFocusBlock;
     analysisResultRef.current = analysisResult;
     onEditorUnmountRef.current = onEditorUnmount;
-  }, [onDirtyChange, onTriggerSave, block, onSwitchFocusBlock, analysisResult, onEditorUnmount]);
+    onCursorPositionChangeRef.current = onCursorPositionChange;
+  }, [onDirtyChange, onTriggerSave, block, onSwitchFocusBlock, analysisResult, onEditorUnmount, onCursorPositionChange]);
 
   // This effect resets the internal dirty flag when the block content is updated
   // from an external source (like a save operation). This ensures the component can
@@ -133,6 +137,7 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
         // The parent's `onEditorUnmount` handler is responsible for syncing state
         // and managing the dirty state transition. This avoids race conditions.
         onEditorUnmountRef.current(blockRef.current.id);
+        onCursorPositionChangeRef.current?.(null);
     };
   }, []); // <-- Empty array ensures this runs ONLY on unmount
   
@@ -407,6 +412,8 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
     
     editor.onDidChangeCursorPosition(() => {
         updateContext();
+        const pos = editor.getPosition();
+        if (pos) onCursorPositionChangeRef.current?.({ line: pos.lineNumber, column: pos.column });
     });
 
     editor.addAction({

@@ -59,7 +59,7 @@ const AudioItem: React.FC<{
 
 const AudioManager: React.FC<AudioManagerProps> = ({ audios, metadata, scanDirectories, onAddScanDirectory, onRemoveScanDirectory, onCopyAudiosToProject, onOpenAudioEditor, isFileSystemApiSupported, lastScanned, isRefreshing, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSource, setSelectedSource] = useState('all');
+  const [selectedSource, setSelectedSource] = useState('Project');
   const [selectedAudioPaths, setSelectedAudioPaths] = useState(new Set<string>());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; audio: RenpyAudio } | null>(null);
   
@@ -77,7 +77,7 @@ const AudioManager: React.FC<AudioManagerProps> = ({ audios, metadata, scanDirec
   }, []);
 
   const sources = useMemo(() => {
-    return ['all', 'Project (game/audio)', ...scanDirectories];
+    return ['all', 'Project', ...scanDirectories];
   }, [scanDirectories]);
 
   useEffect(() => {
@@ -90,7 +90,7 @@ const AudioManager: React.FC<AudioManagerProps> = ({ audios, metadata, scanDirec
     let visibleAudios = audios;
 
     if (selectedSource !== 'all') {
-      if (selectedSource === 'Project (game/audio)') {
+      if (selectedSource === 'Project') {
         visibleAudios = visibleAudios.filter(aud => aud.isInProject);
       } else {
         // Normalize selectedSource to match internal forward-slash paths
@@ -248,11 +248,11 @@ const AudioManager: React.FC<AudioManagerProps> = ({ audios, metadata, scanDirec
                 >
                     {sources.map(source => (
                     <option key={source} value={source}>
-                        {source === 'Project (game/audio)' ? 'Project Audio' : source}
+                        {source === 'Project' ? 'Project Audio' : source}
                     </option>
                     ))}
                 </select>
-                {selectedSource !== 'all' && selectedSource !== 'Project (game/audio)' && (
+                {selectedSource !== 'all' && selectedSource !== 'Project' && (
                     <button
                         onClick={() => onRemoveScanDirectory(selectedSource)}
                         className="p-2 rounded-md hover:bg-red-200 dark:hover:bg-red-800/50 text-gray-500 dark:text-gray-400 hover:text-red-700 dark:hover:text-red-300 flex-shrink-0"

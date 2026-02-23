@@ -38,8 +38,8 @@ interface StoryCanvasProps {
   findUsagesHighlightIds: Set<string> | null;
   clearFindUsages: () => void;
   dirtyBlockIds: Set<string>;
-  canvasFilters: { story: boolean; screens: boolean; config: boolean; notes: boolean };
-  setCanvasFilters: React.Dispatch<React.SetStateAction<{ story: boolean; screens: boolean; config: boolean; notes: boolean }>>;
+  canvasFilters: { story: boolean; screens: boolean; config: boolean; notes: boolean; minimap: boolean };
+  setCanvasFilters: React.Dispatch<React.SetStateAction<{ story: boolean; screens: boolean; config: boolean; notes: boolean; minimap: boolean }>>;
   centerOnBlockRequest: { blockId: string, key: number } | null;
   flashBlockRequest: { blockId: string, key: number } | null;
   hoverHighlightIds: Set<string> | null;
@@ -855,6 +855,11 @@ const StoryCanvas: React.FC<StoryCanvasProps> = ({
                 <input type="checkbox" checked={canvasFilters.notes} onChange={e => setCanvasFilters(f => ({ ...f, notes: e.target.checked }))} className="h-4 w-4 rounded focus:ring-yellow-500" style={{ accentColor: 'rgb(234 179 8)' }} />
                 <span>Notes</span>
             </label>
+            <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+            <label className="flex items-center space-x-2 cursor-pointer text-sm text-secondary">
+                <input type="checkbox" checked={canvasFilters.minimap} onChange={e => setCanvasFilters(f => ({ ...f, minimap: e.target.checked }))} className="h-4 w-4 rounded" style={{ accentColor: 'rgb(107 114 128)' }} />
+                <span>Minimap</span>
+            </label>
         </div>
 
       <div
@@ -988,12 +993,14 @@ const StoryCanvas: React.FC<StoryCanvasProps> = ({
             />
         ))}
       </div>
-      <Minimap
-        items={minimapItems}
-        transform={transform}
-        canvasDimensions={canvasDimensions}
-        onTransformChange={onTransformChange}
-      />
+      {canvasFilters.minimap && (
+        <Minimap
+          items={minimapItems}
+          transform={transform}
+          canvasDimensions={canvasDimensions}
+          onTransformChange={onTransformChange}
+        />
+      )}
       
       {canvasContextMenu && onCreateBlock && onAddStickyNote && (
         <CanvasContextMenu

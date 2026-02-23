@@ -8,9 +8,10 @@ interface StatusBarProps {
   statusMessage?: string;
   version?: string;
   build?: string;
+  cursorPosition?: { line: number; column: number } | null;
 }
 
-const StatusBar: React.FC<StatusBarProps> = ({ totalWords, currentFileWords, readingTime, statusMessage, version, build }) => {
+const StatusBar: React.FC<StatusBarProps> = ({ totalWords, currentFileWords, readingTime, statusMessage, version, build, cursorPosition }) => {
   return (
     <footer className="flex-none h-6 bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 text-xs text-gray-600 dark:text-gray-400 z-20 transition-colors duration-200">
       <div className="flex items-center space-x-2 overflow-hidden mr-4">
@@ -21,6 +22,12 @@ const StatusBar: React.FC<StatusBarProps> = ({ totalWords, currentFileWords, rea
         )}
       </div>
       <div className="flex items-center space-x-4 flex-shrink-0">
+        {cursorPosition && (
+            <>
+                <span title="Cursor position" className="font-mono">Ln {cursorPosition.line}, Col {cursorPosition.column}</span>
+                <div className="w-px h-3 bg-gray-300 dark:bg-gray-600"></div>
+            </>
+        )}
         {currentFileWords !== null && (
             <span title="Words in current editor tab">
             Current File: {currentFileWords.toLocaleString()} words

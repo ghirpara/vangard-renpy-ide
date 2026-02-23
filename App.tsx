@@ -360,6 +360,12 @@ const App: React.FC = () => {
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+  const [dragSourcePaneId, setDragSourcePaneId] = useState<'primary' | 'secondary'>('primary');
+  const [splitLayout, setSplitLayout] = useState<'none' | 'right' | 'bottom'>('none');
+  const [splitPrimarySize, setSplitPrimarySize] = useState<number>(600);
+  const [secondaryOpenTabs, setSecondaryOpenTabs] = useState<EditorTab[]>([]);
+  const [secondaryActiveTabId, setSecondaryActiveTabId] = useState<string>('');
+  const [activePaneId, setActivePaneId] = useState<'primary' | 'secondary'>('primary');
   
   // Scene Composer State
   const [sceneCompositions, setSceneCompositions] = useImmer<Record<string, SceneComposition>>({});
@@ -382,7 +388,7 @@ const App: React.FC = () => {
   const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{ paths: string[]; onConfirm: () => void; } | null>(null);
   const [createBlockModalOpen, setCreateBlockModalOpen] = useState(false);
   const [unsavedChangesModalInfo, setUnsavedChangesModalInfo] = useState<UnsavedChangesModalInfo | null>(null);
-  const [contextMenuInfo, setContextMenuInfo] = useState<{ x: number; y: number; tabId: string } | null>(null);
+  const [contextMenuInfo, setContextMenuInfo] = useState<{ x: number; y: number; tabId: string; paneId: 'primary' | 'secondary' } | null>(null);
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
   const [aboutModalOpen, setAboutModalOpen] = useState(false);
   
@@ -422,7 +428,8 @@ const App: React.FC = () => {
   const [findUsagesHighlightIds, setFindUsagesHighlightIds] = useState<Set<string> | null>(null);
   const [centerOnBlockRequest, setCenterOnBlockRequest] = useState<{ blockId: string, key: number } | null>(null);
   const [flashBlockRequest, setFlashBlockRequest] = useState<{ blockId: string, key: number } | null>(null);
-  const [canvasFilters, setCanvasFilters] = useState({ story: true, screens: true, config: false, notes: true });
+  const [canvasFilters, setCanvasFilters] = useState({ story: true, screens: true, config: false, notes: true, minimap: true });
+  const [editorCursorPosition, setEditorCursorPosition] = useState<{ line: number; column: number } | null>(null);
   const [hoverHighlightIds, setHoverHighlightIds] = useState<Set<string> | null>(null);
 
   // --- State: Route Canvas ---
@@ -446,6 +453,8 @@ const App: React.FC = () => {
   
   // --- Refs ---
   const editorInstances = useRef<Map<string, monaco.editor.IStandaloneCodeEditor>>(new Map());
+  const primaryTabBarRef = useRef<HTMLDivElement>(null);
+  const secondaryTabBarRef = useRef<HTMLDivElement>(null);
   const initialLayoutNeeded = useRef(false);
 
   // --- Utility Functions ---
@@ -1074,14 +1083,27 @@ const App: React.FC = () => {
   // --- Tab Management Helpers ---
   const handleOpenStaticTab = useCallback((type: 'canvas' | 'route-canvas' | 'punchlist' | 'ai-generator' | 'stats') => {
         const id = type;
-        setOpenTabs(prev => {
-            if (!prev.find(t => t.id === id)) {
-                return [...prev, { id, type }];
-            }
-            return prev;
-        });
-        setActiveTabId(id);
-  }, []);
+        // If already open in primary, activate it there
+        if (openTabs.find(t => t.id === id)) {
+            setActiveTabId(id);
+            setActivePaneId('primary');
+            return;
+        }
+        // If already open in secondary, activate it there
+        if (secondaryOpenTabs.find(t => t.id === id)) {
+            setSecondaryActiveTabId(id);
+            setActivePaneId('secondary');
+            return;
+        }
+        // Open in active pane
+        if (activePaneId === 'secondary' && splitLayout !== 'none') {
+            setSecondaryOpenTabs(prev => [...prev, { id, type }]);
+            setSecondaryActiveTabId(id);
+        } else {
+            setOpenTabs(prev => [...prev, { id, type }]);
+            setActiveTabId(id);
+        }
+  }, [openTabs, secondaryOpenTabs, activePaneId, splitLayout]);
 
   // --- File System Integration ---
   
@@ -1335,10 +1357,26 @@ const App: React.FC = () => {
               });
 
               setOpenTabs(rehydratedTabs);
-              
+
               const activeTabIsValid = rehydratedTabs.some(t => t.id === projectData.settings.activeTabId);
               setActiveTabId(activeTabIsValid ? projectData.settings.activeTabId : 'canvas');
-              
+
+              // Restore split state
+              const savedSplitLayout = projectData.settings.splitLayout ?? 'none';
+              const savedSecondary: EditorTab[] = projectData.settings.secondaryOpenTabs ?? [];
+              const validSecondary = savedSecondary.filter((tab: EditorTab) => {
+                  if (tab.type === 'editor' && tab.filePath) return blockFilePathMap.has(tab.filePath);
+                  if (tab.type === 'image' && tab.filePath) return imgMap.has(tab.filePath);
+                  if (tab.type === 'audio' && tab.filePath) return audioMap.has(tab.filePath);
+                  if (tab.type === 'character' && tab.characterTag) return tempAnalysis.characters.has(tab.characterTag);
+                  return tab.type === 'canvas' || tab.type === 'route-canvas' || tab.type === 'punchlist' || tab.type === 'ai-generator' || tab.type === 'stats' || tab.type === 'scene-composer';
+              });
+              setSplitLayout(validSecondary.length > 0 ? savedSplitLayout : 'none');
+              setSplitPrimarySize(projectData.settings.splitPrimarySize ?? 600);
+              setSecondaryOpenTabs(validSecondary);
+              const savedSecondaryActive = projectData.settings.secondaryActiveTabId ?? '';
+              setSecondaryActiveTabId(validSecondary.some((t: EditorTab) => t.id === savedSecondaryActive) ? savedSecondaryActive : validSecondary[0]?.id ?? '');
+
           } else {
               updateProjectSettings(draft => {
                   draft.enableAiFeatures = false;
@@ -1347,6 +1385,9 @@ const App: React.FC = () => {
               });
               setOpenTabs([{ id: 'canvas', type: 'canvas' }]);
               setActiveTabId('canvas');
+              setSplitLayout('none');
+              setSecondaryOpenTabs([]);
+              setSecondaryActiveTabId('');
               setStickyNotes([]);
               setCharacterProfiles({});
               setPunchlistMetadata({});
@@ -1645,6 +1686,10 @@ const App: React.FC = () => {
         ...projectSettings,
         openTabs,
         activeTabId,
+        splitLayout,
+        splitPrimarySize,
+        secondaryOpenTabs,
+        secondaryActiveTabId,
         stickyNotes: Array.from(stickyNotes),
         characterProfiles,
         punchlistMetadata,
@@ -1660,7 +1705,7 @@ const App: React.FC = () => {
       console.error("Failed to save IDE settings:", e);
       addToast('Failed to save workspace settings', 'error');
     }
-  }, [projectRootPath, projectSettings, openTabs, activeTabId, stickyNotes, characterProfiles, addToast, sceneCompositions, sceneNames, imageScanDirectories, audioScanDirectories, punchlistMetadata]);
+  }, [projectRootPath, projectSettings, openTabs, activeTabId, splitLayout, splitPrimarySize, secondaryOpenTabs, secondaryActiveTabId, stickyNotes, characterProfiles, addToast, sceneCompositions, sceneNames, imageScanDirectories, audioScanDirectories, punchlistMetadata]);
 
 
   const handleSaveAll = useCallback(async () => {
@@ -1768,35 +1813,44 @@ const App: React.FC = () => {
     const block = blocks.find(b => b.id === blockId);
     if (!block) return;
 
-    const existing = openTabs.find(t => t.id === blockId);
-    if (!existing) {
-        setOpenTabs(prev => [...prev, { 
-            id: blockId, 
-            type: 'editor', 
-            blockId,
-            filePath: block.filePath,
-            scrollRequest: line ? { line, key: Date.now() } : undefined 
-        }]);
-    } else if (line) {
-        setOpenTabs(prev => prev.map(tab => 
-            tab.id === blockId 
-                ? { ...tab, scrollRequest: { line, key: Date.now() } }
-                : tab
-        ));
+    // If already in primary, activate there
+    if (openTabs.find(t => t.id === blockId)) {
+        if (line) setOpenTabs(prev => prev.map(t => t.id === blockId ? { ...t, scrollRequest: { line, key: Date.now() } } : t));
+        setActiveTabId(blockId);
+        setActivePaneId('primary');
+        return;
     }
-    setActiveTabId(blockId);
-  }, [blocks, openTabs]);
+    // If already in secondary, activate there
+    if (secondaryOpenTabs.find(t => t.id === blockId)) {
+        if (line) setSecondaryOpenTabs(prev => prev.map(t => t.id === blockId ? { ...t, scrollRequest: { line, key: Date.now() } } : t));
+        setSecondaryActiveTabId(blockId);
+        setActivePaneId('secondary');
+        return;
+    }
+    // Open in active pane
+    const newTab: EditorTab = { id: blockId, type: 'editor', blockId, filePath: block.filePath, scrollRequest: line ? { line, key: Date.now() } : undefined };
+    if (activePaneId === 'secondary' && splitLayout !== 'none') {
+        setSecondaryOpenTabs(prev => [...prev, newTab]);
+        setSecondaryActiveTabId(blockId);
+    } else {
+        setOpenTabs(prev => [...prev, newTab]);
+        setActiveTabId(blockId);
+    }
+  }, [blocks, openTabs, secondaryOpenTabs, activePaneId, splitLayout]);
 
   const handleOpenImageEditorTab = useCallback((filePath: string) => {
     const tabId = `img-${filePath}`;
-    setOpenTabs(prev => {
-      if (!prev.find(t => t.id === tabId)) {
-        return [...prev, { id: tabId, type: 'image', filePath: filePath }];
-      }
-      return prev;
-    });
-    setActiveTabId(tabId);
-  }, []);
+    if (openTabs.find(t => t.id === tabId)) { setActiveTabId(tabId); setActivePaneId('primary'); return; }
+    if (secondaryOpenTabs.find(t => t.id === tabId)) { setSecondaryActiveTabId(tabId); setActivePaneId('secondary'); return; }
+    const newTab: EditorTab = { id: tabId, type: 'image', filePath };
+    if (activePaneId === 'secondary' && splitLayout !== 'none') {
+        setSecondaryOpenTabs(prev => [...prev, newTab]);
+        setSecondaryActiveTabId(tabId);
+    } else {
+        setOpenTabs(prev => [...prev, newTab]);
+        setActiveTabId(tabId);
+    }
+  }, [openTabs, secondaryOpenTabs, activePaneId, splitLayout]);
 
   const handlePathDoubleClick = useCallback((filePath: string) => {
     const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
@@ -1812,30 +1866,49 @@ const App: React.FC = () => {
     }
   }, [blocks, handleOpenEditor, handleOpenImageEditorTab]);
 
-  const handleCloseTab = useCallback((tabId: string, e?: React.MouseEvent) => {
+  const handleCloseTab = useCallback((tabId: string, paneId: 'primary' | 'secondary', e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setOpenTabs(prev => prev.filter(t => t.id !== tabId));
-    if (activeTabId === tabId) {
-        setActiveTabId('canvas');
+    if (paneId === 'primary') {
+        setOpenTabs(prev => prev.filter(t => t.id !== tabId));
+        if (activeTabId === tabId) setActiveTabId('canvas');
+    } else {
+        setSecondaryOpenTabs(prev => {
+            const next = prev.filter(t => t.id !== tabId);
+            if (next.length === 0) {
+                // Auto-close pane when last secondary tab removed
+                setSplitLayout('none');
+                setActivePaneId('primary');
+                setSecondaryActiveTabId('');
+            } else {
+                if (secondaryActiveTabId === tabId) setSecondaryActiveTabId(next[next.length - 1].id);
+            }
+            return next;
+        });
     }
-  }, [activeTabId]);
+  }, [activeTabId, secondaryActiveTabId]);
 
-  const handleTabContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
+  const handleTabContextMenu = useCallback((e: React.MouseEvent, tabId: string, paneId: 'primary' | 'secondary' = 'primary') => {
       e.preventDefault();
-      setContextMenuInfo({ x: e.clientX, y: e.clientY, tabId });
+      setContextMenuInfo({ x: e.clientX, y: e.clientY, tabId, paneId });
   }, []);
 
-  const processTabCloseRequest = useCallback((tabsToClose: EditorTab[], fallbackTabId: string) => {
+  const processTabCloseRequest = useCallback((tabsToClose: EditorTab[], fallbackTabId: string, paneId: 'primary' | 'secondary' = 'primary') => {
     if (tabsToClose.length === 0) return;
 
     const hasUnsaved = tabsToClose.some(t => t.blockId && (dirtyBlockIds.has(t.blockId) || dirtyEditors.has(t.blockId)));
-    
+
     const performClose = () => {
         const idsToClose = new Set(tabsToClose.map(t => t.id));
-        setOpenTabs(prev => prev.filter(t => !idsToClose.has(t.id)));
-        
-        if (idsToClose.has(activeTabId)) {
-            setActiveTabId(fallbackTabId);
+        if (paneId === 'primary') {
+            setOpenTabs(prev => prev.filter(t => !idsToClose.has(t.id)));
+            if (idsToClose.has(activeTabId)) setActiveTabId(fallbackTabId);
+        } else {
+            setSecondaryOpenTabs(prev => {
+                const next = prev.filter(t => !idsToClose.has(t.id));
+                if (next.length === 0) { setSplitLayout('none'); setActivePaneId('primary'); setSecondaryActiveTabId(''); }
+                else if (idsToClose.has(secondaryActiveTabId)) setSecondaryActiveTabId(next[0].id);
+                return next;
+            });
         }
     };
 
@@ -1873,33 +1946,107 @@ const App: React.FC = () => {
     } else {
         performClose();
     }
-}, [dirtyBlockIds, dirtyEditors, activeTabId, handleSaveAll]);
+}, [dirtyBlockIds, dirtyEditors, activeTabId, secondaryActiveTabId, handleSaveAll]);
 
-  const handleCloseOthersRequest = useCallback((tabId: string) => {
-    const tabsToClose = openTabs.filter(t => t.id !== tabId && t.id !== 'canvas' && t.id !== 'ai-generator');
-    processTabCloseRequest(tabsToClose, tabId);
-  }, [openTabs, processTabCloseRequest]);
+  const handleCloseOthersRequest = useCallback((tabId: string, paneId: 'primary' | 'secondary' = 'primary') => {
+    const tabs = paneId === 'primary' ? openTabs : secondaryOpenTabs;
+    const tabsToClose = tabs.filter(t => t.id !== tabId && t.id !== 'canvas' && t.id !== 'ai-generator');
+    processTabCloseRequest(tabsToClose, tabId, paneId);
+  }, [openTabs, secondaryOpenTabs, processTabCloseRequest]);
 
-  const handleCloseAllRequest = useCallback(() => {
-    const tabsToClose = openTabs.filter(t => t.id !== 'canvas' && t.id !== 'ai-generator');
-    processTabCloseRequest(tabsToClose, 'canvas');
-  }, [openTabs, processTabCloseRequest]);
+  const handleCloseAllRequest = useCallback((paneId: 'primary' | 'secondary' = 'primary') => {
+    const tabs = paneId === 'primary' ? openTabs : secondaryOpenTabs;
+    const tabsToClose = tabs.filter(t => t.id !== 'canvas' && t.id !== 'ai-generator');
+    processTabCloseRequest(tabsToClose, 'canvas', paneId);
+  }, [openTabs, secondaryOpenTabs, processTabCloseRequest]);
 
-  const handleCloseLeftRequest = useCallback((tabId: string) => {
-    const index = openTabs.findIndex(t => t.id === tabId);
+  const handleCloseLeftRequest = useCallback((tabId: string, paneId: 'primary' | 'secondary' = 'primary') => {
+    const tabs = paneId === 'primary' ? openTabs : secondaryOpenTabs;
+    const index = tabs.findIndex(t => t.id === tabId);
     if (index === -1) return;
-    const tabsToClose = openTabs.slice(0, index).filter(t => t.id !== 'canvas' && t.id !== 'ai-generator');
-    processTabCloseRequest(tabsToClose, tabId);
-  }, [openTabs, processTabCloseRequest]);
+    const tabsToClose = tabs.slice(0, index).filter(t => t.id !== 'canvas' && t.id !== 'ai-generator');
+    processTabCloseRequest(tabsToClose, tabId, paneId);
+  }, [openTabs, secondaryOpenTabs, processTabCloseRequest]);
 
-  const handleCloseRightRequest = useCallback((tabId: string) => {
-    const index = openTabs.findIndex(t => t.id === tabId);
+  const handleCloseRightRequest = useCallback((tabId: string, paneId: 'primary' | 'secondary' = 'primary') => {
+    const tabs = paneId === 'primary' ? openTabs : secondaryOpenTabs;
+    const index = tabs.findIndex(t => t.id === tabId);
     if (index === -1) return;
-    const tabsToClose = openTabs.slice(index + 1).filter(t => t.id !== 'canvas' && t.id !== 'ai-generator');
-    processTabCloseRequest(tabsToClose, tabId);
-  }, [openTabs, processTabCloseRequest]);
+    const tabsToClose = tabs.slice(index + 1).filter(t => t.id !== 'canvas' && t.id !== 'ai-generator');
+    processTabCloseRequest(tabsToClose, tabId, paneId);
+  }, [openTabs, secondaryOpenTabs, processTabCloseRequest]);
 
-  const handleSwitchTab = (tabId: string) => setActiveTabId(tabId);
+  const handleSwitchTab = (tabId: string, paneId: 'primary' | 'secondary' = 'primary') => {
+    if (paneId === 'primary') { setActiveTabId(tabId); setActivePaneId('primary'); }
+    else { setSecondaryActiveTabId(tabId); setActivePaneId('secondary'); }
+  };
+
+  // --- Split Pane Management ---
+  const handleCreateSplit = useCallback((direction: 'right' | 'bottom') => {
+    if (splitLayout !== 'none') return;
+    setSecondaryOpenTabs([{ id: 'canvas', type: 'canvas' }]);
+    setSecondaryActiveTabId('canvas');
+    setSplitLayout(direction);
+    setSplitPrimarySize(direction === 'right' ? 600 : 400);
+    setActivePaneId('secondary');
+  }, [splitLayout]);
+
+  const handleOpenInSplit = useCallback((tabId: string, direction: 'right' | 'bottom') => {
+    const tab = openTabs.find(t => t.id === tabId);
+    if (!tab) return;
+    if (splitLayout !== 'none') {
+      // Already split — move to secondary
+      if (!secondaryOpenTabs.find(t => t.id === tabId)) setSecondaryOpenTabs(prev => [...prev, tab]);
+      setSecondaryActiveTabId(tabId);
+      setOpenTabs(prev => prev.filter(t => t.id !== tabId));
+      if (activeTabId === tabId) setActiveTabId('canvas');
+      setActivePaneId('secondary');
+      return;
+    }
+    // Create split and move tab to secondary
+    setOpenTabs(prev => prev.filter(t => t.id !== tabId));
+    if (activeTabId === tabId) setActiveTabId('canvas');
+    setSecondaryOpenTabs([tab]);
+    setSecondaryActiveTabId(tabId);
+    setSplitLayout(direction);
+    setSplitPrimarySize(direction === 'right' ? 600 : 400);
+    setActivePaneId('secondary');
+  }, [openTabs, activeTabId, secondaryOpenTabs, splitLayout]);
+
+  const handleMoveToOtherPane = useCallback((tabId: string, fromPaneId: 'primary' | 'secondary') => {
+    if (fromPaneId === 'primary') {
+      const tab = openTabs.find(t => t.id === tabId);
+      if (!tab) return;
+      setOpenTabs(prev => prev.filter(t => t.id !== tabId));
+      if (activeTabId === tabId) setActiveTabId('canvas');
+      if (!secondaryOpenTabs.find(t => t.id === tabId)) setSecondaryOpenTabs(prev => [...prev, tab]);
+      setSecondaryActiveTabId(tabId);
+      setActivePaneId('secondary');
+    } else {
+      const tab = secondaryOpenTabs.find(t => t.id === tabId);
+      if (!tab) return;
+      const newSecondary = secondaryOpenTabs.filter(t => t.id !== tabId);
+      if (newSecondary.length === 0) {
+        setSecondaryOpenTabs([]);
+        setSecondaryActiveTabId('');
+        setSplitLayout('none');
+        setActivePaneId('primary');
+      } else {
+        setSecondaryOpenTabs(newSecondary);
+        if (secondaryActiveTabId === tabId) setSecondaryActiveTabId(newSecondary[0].id);
+      }
+      if (!openTabs.find(t => t.id === tabId)) setOpenTabs(prev => [...prev, tab]);
+      setActiveTabId(tabId);
+      setActivePaneId('primary');
+    }
+  }, [openTabs, activeTabId, secondaryOpenTabs, secondaryActiveTabId]);
+
+  const handleCloseSecondaryPane = useCallback(() => {
+    setSecondaryOpenTabs([]);
+    setSecondaryActiveTabId('');
+    setSplitLayout('none');
+    setActivePaneId('primary');
+  }, []);
 
   const handleCenterOnBlock = useCallback((target: string) => {
       let blockId = target;
@@ -1960,10 +2107,11 @@ const App: React.FC = () => {
   }, [blocks, analysisResult, addToast, stickyNotes, canvasFilters.notes]);
 
   // DnD Handlers for Tabs
-  const handleTabDragStart = (e: React.DragEvent<HTMLDivElement>, tabId: string) => {
+  const handleTabDragStart = (e: React.DragEvent<HTMLDivElement>, tabId: string, paneId: 'primary' | 'secondary' = 'primary') => {
     setDraggedTabId(tabId);
+    setDragSourcePaneId(paneId);
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', tabId); 
+    e.dataTransfer.setData('text/plain', tabId);
   };
 
   const handleTabDragOver = (e: React.DragEvent<HTMLDivElement>, targetTabId: string) => {
@@ -1973,21 +2121,25 @@ const App: React.FC = () => {
     }
   };
 
-  const handleTabDrop = (e: React.DragEvent<HTMLDivElement>, targetTabId: string) => {
+  const handleTabDrop = (e: React.DragEvent<HTMLDivElement>, targetTabId: string, targetPaneId: 'primary' | 'secondary' = 'primary') => {
     e.preventDefault();
     if (!draggedTabId || draggedTabId === targetTabId) return;
-    
-    const fromIndex = openTabs.findIndex(t => t.id === draggedTabId);
-    const toIndex = openTabs.findIndex(t => t.id === targetTabId);
-    
+    // Only reorder within the same pane
+    if (dragSourcePaneId !== targetPaneId) { setDraggedTabId(null); return; }
+
+    const setTabs = targetPaneId === 'primary' ? setOpenTabs : setSecondaryOpenTabs;
+    const tabs = targetPaneId === 'primary' ? openTabs : secondaryOpenTabs;
+    const fromIndex = tabs.findIndex(t => t.id === draggedTabId);
+    const toIndex = tabs.findIndex(t => t.id === targetTabId);
+
     if (fromIndex !== -1 && toIndex !== -1) {
-        setOpenTabs(prev => {
+        setTabs(prev => {
             const newTabs = [...prev];
             const [moved] = newTabs.splice(fromIndex, 1);
             newTabs.splice(toIndex, 0, moved);
             return newTabs;
         });
-        setHasUnsavedSettings(true); 
+        setHasUnsavedSettings(true);
     }
     setDraggedTabId(null);
   };
@@ -2024,14 +2176,17 @@ const App: React.FC = () => {
   // --- Character Editor ---
   const handleOpenCharacterEditor = useCallback((tag: string) => {
       const tabId = `char-${tag}`;
-      setOpenTabs(prev => {
-          if (!prev.find(t => t.id === tabId)) {
-              return [...prev, { id: tabId, type: 'character', characterTag: tag }];
-          }
-          return prev;
-      });
-      setActiveTabId(tabId);
-  }, []);
+      if (openTabs.find(t => t.id === tabId)) { setActiveTabId(tabId); setActivePaneId('primary'); return; }
+      if (secondaryOpenTabs.find(t => t.id === tabId)) { setSecondaryActiveTabId(tabId); setActivePaneId('secondary'); return; }
+      const newTab: EditorTab = { id: tabId, type: 'character', characterTag: tag };
+      if (activePaneId === 'secondary' && splitLayout !== 'none') {
+          setSecondaryOpenTabs(prev => [...prev, newTab]);
+          setSecondaryActiveTabId(tabId);
+      } else {
+          setOpenTabs(prev => [...prev, newTab]);
+          setActiveTabId(tabId);
+      }
+  }, [openTabs, secondaryOpenTabs, activePaneId, splitLayout]);
 
   const handleUpdateCharacter = useCallback(async (char: Character, oldTag?: string) => {
     const buildCharacterString = (char: Character): string => {
@@ -2350,6 +2505,176 @@ const App: React.FC = () => {
       };
   }, []);
 
+  // --- Tab helpers (used by both panes) ---
+  const getTabLabel = (tab: EditorTab): React.ReactNode => {
+    if (tab.id === 'canvas') return 'Story Canvas';
+    if (tab.id === 'route-canvas') return 'Route Canvas';
+    if (tab.id === 'punchlist') return 'Punchlist';
+    if (tab.id === 'stats') return 'Stats';
+    if (tab.type === 'ai-generator') return 'AI Generator';
+    if (tab.type === 'scene-composer') return sceneNames[tab.sceneId!] || 'Scene';
+    if (tab.type === 'character') return `Char: ${analysisResult.characters.get(tab.characterTag!)?.name || tab.characterTag}`;
+    if (tab.type === 'editor') return blocks.find(b => b.id === tab.blockId)?.title || 'Untitled';
+    return tab.filePath?.split('/').pop() ?? 'Untitled';
+  };
+
+  const renderTabContent = (tab: EditorTab): React.ReactNode => {
+    if (tab.type === 'canvas') {
+      return <StoryCanvas
+        blocks={blocks} groups={groups} stickyNotes={stickyNotes} analysisResult={analysisResult}
+        updateBlock={updateBlock} updateGroup={updateGroup} updateBlockPositions={updateBlockPositions}
+        updateGroupPositions={updateGroupPositions} updateStickyNote={updateStickyNote} deleteStickyNote={deleteStickyNote}
+        onInteractionEnd={() => {}} deleteBlock={deleteBlock} onOpenEditor={handleOpenEditor}
+        selectedBlockIds={selectedBlockIds} setSelectedBlockIds={setSelectedBlockIds}
+        selectedGroupIds={selectedGroupIds} setSelectedGroupIds={setSelectedGroupIds}
+        findUsagesHighlightIds={findUsagesHighlightIds} clearFindUsages={() => setFindUsagesHighlightIds(null)}
+        dirtyBlockIds={dirtyBlockIds} canvasFilters={canvasFilters} setCanvasFilters={setCanvasFilters}
+        centerOnBlockRequest={centerOnBlockRequest} flashBlockRequest={flashBlockRequest}
+        hoverHighlightIds={hoverHighlightIds} transform={storyCanvasTransform} onTransformChange={setStoryCanvasTransform}
+        onCreateBlock={handleCreateBlockFromCanvas} onAddStickyNote={addStickyNote} mouseGestures={appSettings.mouseGestures}
+      />;
+    }
+    if (tab.type === 'route-canvas') {
+      return <RouteCanvas
+        labelNodes={routeAnalysisResult.labelNodes} routeLinks={routeAnalysisResult.routeLinks}
+        identifiedRoutes={routeAnalysisResult.identifiedRoutes} updateLabelNodePositions={handleUpdateRouteNodePositions}
+        onOpenEditor={handleOpenEditor} transform={routeCanvasTransform} onTransformChange={setRouteCanvasTransform}
+        mouseGestures={appSettings.mouseGestures}
+      />;
+    }
+    if (tab.type === 'punchlist') {
+      return <PunchlistManager
+        blocks={blocks} stickyNotes={stickyNotes} analysisResult={analysisResult}
+        projectImages={images} imageMetadata={imageMetadata} projectAudios={audios} audioMetadata={audioMetadata}
+        punchlistMetadata={punchlistMetadata}
+        onUpdateMetadata={(id, data) => { setPunchlistMetadata(draft => { if (data === undefined) { delete draft[id]; } else { draft[id] = { ...draft[id], ...data }; } }); setHasUnsavedSettings(true); }}
+        onOpenBlock={handleOpenEditor} onHighlightBlock={(id) => handleCenterOnBlock(id)}
+      />;
+    }
+    if (tab.type === 'ai-generator') {
+      return <AIGeneratorView
+        currentBlockId={getCurrentBlockId()} blocks={blocks} analysisResult={analysisResult}
+        getCurrentContext={getCurrentContext} availableModels={AVAILABLE_MODELS} selectedModel={projectSettings.selectedModel}
+      />;
+    }
+    if (tab.id === 'stats') {
+      return <StatsView blocks={blocks} analysisResult={analysisResult} routeAnalysisResult={routeAnalysisResult} />;
+    }
+    if (tab.type === 'editor' && tab.blockId) {
+      const block = blocks.find(b => b.id === tab.blockId);
+      if (block) return <EditorView
+        block={block} blocks={blocks} analysisResult={analysisResult} initialScrollRequest={tab.scrollRequest}
+        onSwitchFocusBlock={handleOpenEditor} onSave={(id, content) => updateBlock(id, { content })}
+        onTriggerSave={handleSaveBlock}
+        onDirtyChange={(id, dirty) => { setDirtyEditors(prev => { const next = new Set(prev); if (dirty) { next.add(id); } else { next.delete(id); } return next; }); }}
+        editorTheme={appSettings.theme.includes('dark') ? 'dark' : 'light'} editorFontFamily={appSettings.editorFontFamily}
+        editorFontSize={appSettings.editorFontSize} enableAiFeatures={projectSettings.enableAiFeatures}
+        availableModels={AVAILABLE_MODELS} selectedModel={projectSettings.selectedModel} addToast={addToast}
+        onEditorMount={(id, editor) => editorInstances.current.set(id, editor)}
+        onEditorUnmount={(id) => { const editor = editorInstances.current.get(id); if (editor) { const block = blocksRef.current.find(b => b.id === id); if (block && editor.getValue() !== block.content) { syncEditorToStateAndMarkDirty(id, editor.getValue()); } } editorInstances.current.delete(id); }}
+        onCursorPositionChange={setEditorCursorPosition}
+        draftingMode={projectSettings.draftingMode} existingImageTags={existingImageTags} existingAudioPaths={existingAudioPaths}
+      />;
+    }
+    if (tab.type === 'image' && tab.filePath) {
+      const img = images.get(tab.filePath);
+      if (img) { const meta = imageMetadata.get(img.projectFilePath || img.filePath); return <ImageEditorView
+        image={img} allImages={Array.from(images.values())} metadata={meta}
+        onUpdateMetadata={(path, newMeta) => { setImageMetadata(prev => { const next = new Map(prev); next.set(path, newMeta); return next; }); setHasUnsavedSettings(true); }}
+        onCopyToProject={async (sourcePath, meta) => { if (window.electronAPI && projectRootPath) { const fileName = sourcePath.split('/').pop() || 'image.png'; const subfolder = meta.projectSubfolder || ''; const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'images', subfolder); const destPath = await window.electronAPI.path.join(destDir, fileName); await window.electronAPI.copyEntry(sourcePath, destPath); await loadProject(projectRootPath); } }}
+      />; }
+    }
+    if (tab.type === 'audio' && tab.filePath) {
+      const aud = audios.get(tab.filePath);
+      if (aud) { const meta = audioMetadata.get(aud.projectFilePath || aud.filePath); return <AudioEditorView
+        audio={aud} metadata={meta}
+        onUpdateMetadata={(path, newMeta) => { setAudioMetadata(prev => { const next = new Map(prev); next.set(path, newMeta); return next; }); setHasUnsavedSettings(true); }}
+        onCopyToProject={async (sourcePath, meta) => { if (window.electronAPI && projectRootPath) { const fileName = sourcePath.split('/').pop() || 'audio.ogg'; const subfolder = meta.projectSubfolder || ''; const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'audio', subfolder); const destPath = await window.electronAPI.path.join(destDir, fileName); await window.electronAPI.copyEntry(sourcePath, destPath); await loadProject(projectRootPath); } }}
+      />; }
+    }
+    if (tab.type === 'character' && tab.characterTag) {
+      const char = analysisResultWithProfiles.characters.get(tab.characterTag);
+      return <CharacterEditorView character={char} onSave={handleUpdateCharacter}
+        existingTags={Array.from(analysisResult.characters.keys())}
+        projectImages={Array.from(images.values())} imageMetadata={imageMetadata}
+      />;
+    }
+    if (tab.type === 'scene-composer' && tab.sceneId) {
+      const composition = sceneCompositions[tab.sceneId] || { background: null, sprites: [] };
+      const name = sceneNames[tab.sceneId] || 'Scene';
+      return <SceneComposer
+        images={Array.from(images.values())} metadata={imageMetadata} scene={composition}
+        onSceneChange={(val) => handleSceneUpdate(tab.sceneId!, val)} sceneName={name}
+        onRenameScene={(newName) => handleRenameScene(tab.sceneId!, newName)}
+      />;
+    }
+    return null;
+  };
+
+  const renderTabBar = (tabs: EditorTab[], activeId: string, paneId: 'primary' | 'secondary', scrollRef: React.RefObject<HTMLDivElement>) => (
+    <div className={`flex-none flex items-center bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 ${splitLayout !== 'none' && activePaneId === paneId ? 'border-t-2 border-t-indigo-500' : ''}`}>
+      {/* Scrollable tab strip */}
+      <div ref={scrollRef} className="flex flex-1 overflow-x-auto no-scrollbar min-w-0">
+        {tabs.map(tab => (
+          <div
+            key={tab.id}
+            className={`flex items-center px-3 py-2 text-sm border-r border-gray-200 dark:border-gray-700 cursor-pointer min-w-[100px] max-w-[200px] flex-none group ${activeId === tab.id ? 'bg-white dark:bg-gray-900 font-semibold' : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
+            onClick={() => handleSwitchTab(tab.id, paneId)}
+            draggable
+            onDragStart={(e) => handleTabDragStart(e, tab.id, paneId)}
+            onDragOver={(e) => handleTabDragOver(e, tab.id)}
+            onDrop={(e) => handleTabDrop(e, tab.id, paneId)}
+            onContextMenu={(e) => handleTabContextMenu(e, tab.id, paneId)}
+          >
+            <span className="truncate flex-grow">{getTabLabel(tab)}</span>
+            {tab.id !== 'canvas' && (
+              <button onClick={(e) => handleCloseTab(tab.id, paneId, e)} className="ml-2 opacity-0 group-hover:opacity-100 hover:text-red-500 rounded-full p-0.5">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+              </button>
+            )}
+            {tab.blockId && (dirtyBlockIds.has(tab.blockId) || dirtyEditors.has(tab.blockId)) && <div className="w-2 h-2 ml-2 bg-blue-500 rounded-full flex-none" />}
+          </div>
+        ))}
+      </div>
+      {/* Pinned right actions */}
+      <div className="flex items-center flex-none border-l border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => scrollRef.current?.scrollBy({ left: -150, behavior: 'smooth' })}
+          title="Scroll tabs left"
+          className="px-1 py-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+        <button
+          onClick={() => scrollRef.current?.scrollBy({ left: 150, behavior: 'smooth' })}
+          title="Scroll tabs right"
+          className="px-1 py-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M4.5 2L8.5 6L4.5 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+        {paneId === 'primary' && splitLayout === 'none' && (
+          <>
+            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-0.5" />
+            <button onClick={() => handleCreateSplit('right')} title="Split Right" className="p-1 rounded text-gray-400 hover:text-indigo-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="6" height="12" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="2" width="6" height="12" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
+            </button>
+            <button onClick={() => handleCreateSplit('bottom')} title="Split Below" className="p-1 rounded text-gray-400 hover:text-indigo-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none"><rect x="2" y="1" width="12" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="9" width="12" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
+            </button>
+          </>
+        )}
+        {paneId === 'secondary' && (
+          <>
+            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-0.5" />
+            <button onClick={handleCloseSecondaryPane} title="Close Pane" className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className={`fixed inset-0 flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 ${appSettings.theme}`}>
       <Toolbar
@@ -2476,277 +2801,82 @@ const App: React.FC = () => {
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0 bg-gray-50 dark:bg-gray-900 relative">
-            <div className="flex-none flex bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 overflow-x-auto no-scrollbar">
+          {/* Panes container — flex-row for right split, flex-col for bottom split */}
+          <div className={`flex-grow flex ${splitLayout === 'bottom' ? 'flex-col' : 'flex-row'} overflow-hidden min-h-0`}>
+
+            {/* PRIMARY PANE */}
+            <div
+              className="flex flex-col min-w-0 min-h-0"
+              style={splitLayout === 'right' ? { width: splitPrimarySize, flexShrink: 0 } : splitLayout === 'bottom' ? { height: splitPrimarySize, flexShrink: 0 } : { flex: 1 }}
+              onClick={() => activePaneId !== 'primary' && setActivePaneId('primary')}
+            >
+              {renderTabBar(openTabs, activeTabId, 'primary', primaryTabBarRef)}
+              <div className="flex-grow relative overflow-hidden">
                 {openTabs.map(tab => (
-                    <div 
-                        key={tab.id}
-                        className={`flex items-center px-3 py-2 text-sm border-r border-gray-200 dark:border-gray-700 cursor-pointer min-w-[100px] max-w-[200px] group ${activeTabId === tab.id ? 'bg-white dark:bg-gray-900 font-semibold border-t-2 border-t-indigo-500' : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
-                        onClick={() => handleSwitchTab(tab.id)}
-                        draggable
-                        onDragStart={(e) => handleTabDragStart(e, tab.id)}
-                        onDragOver={(e) => handleTabDragOver(e, tab.id)}
-                        onDrop={(e) => handleTabDrop(e, tab.id)}
-                        onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
-                    >
-                        <span className="truncate flex-grow">
-                            {tab.id === 'canvas' ? 'Story Canvas' : 
-                             tab.id === 'route-canvas' ? 'Route Canvas' :
-                             tab.id === 'punchlist' ? 'Punchlist' :
-                             tab.type === 'scene-composer' ? (sceneNames[tab.sceneId!] || 'Scene') :
-                             tab.type === 'character' ? `Char: ${analysisResult.characters.get(tab.characterTag!)?.name || tab.characterTag}` :
-                             tab.type === 'editor' ? (blocks.find(b => b.id === tab.blockId)?.title || 'Untitled') :
-                             tab.type === 'ai-generator' ? 'AI Generator' :
-                             tab.id === 'stats' ? 'Stats' :
-                             tab.filePath?.split('/').pop()}
-                        </span>
-                        {tab.id !== 'canvas' && (
-                            <button onClick={(e) => handleCloseTab(tab.id, e)} className="ml-2 opacity-0 group-hover:opacity-100 hover:text-red-500 rounded-full p-0.5">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                            </button>
-                        )}
-                        {(tab.blockId && (dirtyBlockIds.has(tab.blockId) || dirtyEditors.has(tab.blockId))) && <div className="w-2 h-2 ml-2 bg-blue-500 rounded-full"></div>}
+                    <div key={tab.id} className="w-full h-full absolute" style={{ visibility: tab.id === activeTabId ? 'visible' : 'hidden' }}>
+                        {renderTabContent(tab)}
                     </div>
                 ))}
+              </div>
             </div>
-            
-            <div className="flex-grow relative overflow-hidden">
-                {openTabs.map(tab => {
-                    const isActive = tab.id === activeTabId;
-                    let content = null;
 
-                    if (tab.type === 'canvas') {
-                        content = <StoryCanvas
-                            blocks={blocks}
-                            groups={groups}
-                            stickyNotes={stickyNotes}
-                            analysisResult={analysisResult}
-                            updateBlock={updateBlock}
-                            updateGroup={updateGroup}
-                            updateBlockPositions={updateBlockPositions}
-                            updateGroupPositions={updateGroupPositions}
-                            updateStickyNote={updateStickyNote}
-                            deleteStickyNote={deleteStickyNote}
-                            onInteractionEnd={() => {}}
-                            deleteBlock={deleteBlock}
-                            onOpenEditor={handleOpenEditor}
-                            selectedBlockIds={selectedBlockIds}
-                            setSelectedBlockIds={setSelectedBlockIds}
-                            selectedGroupIds={selectedGroupIds}
-                            setSelectedGroupIds={setSelectedGroupIds}
-                            findUsagesHighlightIds={findUsagesHighlightIds}
-                            clearFindUsages={() => setFindUsagesHighlightIds(null)}
-                            dirtyBlockIds={dirtyBlockIds}
-                            canvasFilters={canvasFilters}
-                            setCanvasFilters={setCanvasFilters}
-                            centerOnBlockRequest={centerOnBlockRequest}
-                            flashBlockRequest={flashBlockRequest}
-                            hoverHighlightIds={hoverHighlightIds}
-                            transform={storyCanvasTransform}
-                            onTransformChange={setStoryCanvasTransform}
-                            onCreateBlock={handleCreateBlockFromCanvas}
-                            onAddStickyNote={addStickyNote}
-                            mouseGestures={appSettings.mouseGestures}
-                        />;
-                    } else if (tab.type === 'route-canvas') {
-                        content = <RouteCanvas 
-                            labelNodes={routeAnalysisResult.labelNodes}
-                            routeLinks={routeAnalysisResult.routeLinks}
-                            identifiedRoutes={routeAnalysisResult.identifiedRoutes}
-                            updateLabelNodePositions={handleUpdateRouteNodePositions}
-                            onOpenEditor={handleOpenEditor}
-                            transform={routeCanvasTransform}
-                            onTransformChange={setRouteCanvasTransform}
-                            mouseGestures={appSettings.mouseGestures}
-                        />;
-                    } else if (tab.type === 'punchlist') {
-                        content = <PunchlistManager
-                            blocks={blocks}
-                            stickyNotes={stickyNotes}
-                            analysisResult={analysisResult}
-                            projectImages={images}
-                            imageMetadata={imageMetadata}
-                            projectAudios={audios}
-                            audioMetadata={audioMetadata}
-                            punchlistMetadata={punchlistMetadata}
-                            onUpdateMetadata={(id, data) => {
-                                setPunchlistMetadata(draft => {
-                                    if (data === undefined) {
-                                        delete draft[id];
-                                    } else {
-                                        draft[id] = { ...draft[id], ...data };
-                                    }
-                                });
-                                setHasUnsavedSettings(true);
-                            }}
-                            onOpenBlock={handleOpenEditor}
-                            onHighlightBlock={(id) => handleCenterOnBlock(id)}
-                        />;
-                    } else if (tab.type === 'ai-generator') {
-                        content = <AIGeneratorView
-                            currentBlockId={getCurrentBlockId()}
-                            blocks={blocks}
-                            analysisResult={analysisResult}
-                            getCurrentContext={getCurrentContext}
-                            availableModels={AVAILABLE_MODELS}
-                            selectedModel={projectSettings.selectedModel}
-                        />;
-                    } else if (tab.type === 'stats') {
-                        content = <StatsView
-                            blocks={blocks}
-                            analysisResult={analysisResult}
-                            routeAnalysisResult={routeAnalysisResult}
-                        />;
-                    } else if (tab.type === 'editor' && tab.blockId) {
-                        const block = blocks.find(b => b.id === tab.blockId);
-                        if (block) {
-                            content = <EditorView
-                                block={block}
-                                blocks={blocks}
-                                analysisResult={analysisResult}
-                                initialScrollRequest={tab.scrollRequest}
-                                onSwitchFocusBlock={handleOpenEditor}
-                                onSave={(id, content) => updateBlock(id, { content })}
-                                onTriggerSave={handleSaveBlock}
-                                onDirtyChange={(id, dirty) => {
-                                    setDirtyEditors(prev => {
-                                        const next = new Set(prev);
-                                        if (dirty) { next.add(id); } else { next.delete(id); }
-                                        return next;
-                                    });
-                                }}
-                                editorTheme={appSettings.theme.includes('dark') ? 'dark' : 'light'}
-                                editorFontFamily={appSettings.editorFontFamily}
-                                editorFontSize={appSettings.editorFontSize}
-                                enableAiFeatures={projectSettings.enableAiFeatures}
-                                availableModels={AVAILABLE_MODELS}
-                                selectedModel={projectSettings.selectedModel}
-                                addToast={addToast}
-                                onEditorMount={(id, editor) => editorInstances.current.set(id, editor)}
-                                onEditorUnmount={(id) => {
-                                    const editor = editorInstances.current.get(id);
-                                    if (editor) {
-                                        const block = blocksRef.current.find(b => b.id === id);
-                                        if (block && editor.getValue() !== block.content) {
-                                            syncEditorToStateAndMarkDirty(id, editor.getValue());
-                                        }
-                                    }
-                                    editorInstances.current.delete(id);
-                                }}
-                                draftingMode={projectSettings.draftingMode}
-                                existingImageTags={existingImageTags}
-                                existingAudioPaths={existingAudioPaths}
-                            />;
-                        }
-                    } else if (tab.type === 'image' && tab.filePath) {
-                        const img = images.get(tab.filePath);
-                        if (img) {
-                            const meta = imageMetadata.get(img.projectFilePath || img.filePath);
-                            content = <ImageEditorView 
-                                image={img} 
-                                allImages={Array.from(images.values())}
-                                metadata={meta}
-                                onUpdateMetadata={(path, newMeta) => {
-                                    setImageMetadata(prev => { 
-                                        const next = new Map(prev);
-                                        next.set(path, newMeta);
-                                        return next;
-                                    });
-                                    setHasUnsavedSettings(true);
-                                }}
-                                onCopyToProject={async (sourcePath, meta) => {
-                                    if (window.electronAPI && projectRootPath) {
-                                        const fileName = sourcePath.split('/').pop() || 'image.png';
-                                        const subfolder = meta.projectSubfolder || '';
-                                        const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'images', subfolder);
-                                        const destPath = await window.electronAPI.path.join(destDir, fileName);
-                                        
-                                        await window.electronAPI.copyEntry(sourcePath, destPath);
-                                        await loadProject(projectRootPath);
-                                    }
-                                }}
-                            />;
-                        }
-                    } else if (tab.type === 'audio' && tab.filePath) {
-                        const aud = audios.get(tab.filePath);
-                        if(aud) {
-                            const meta = audioMetadata.get(aud.projectFilePath || aud.filePath);
-                            content = <AudioEditorView 
-                                audio={aud} 
-                                metadata={meta}
-                                onUpdateMetadata={(path, newMeta) => {
-                                    setAudioMetadata(prev => {
-                                        const next = new Map(prev);
-                                        next.set(path, newMeta);
-                                        return next;
-                                    });
-                                    setHasUnsavedSettings(true);
-                                }}
-                                onCopyToProject={async (sourcePath, meta) => {
-                                    if (window.electronAPI && projectRootPath) {
-                                        const fileName = sourcePath.split('/').pop() || 'audio.ogg';
-                                        const subfolder = meta.projectSubfolder || '';
-                                        const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'audio', subfolder);
-                                        const destPath = await window.electronAPI.path.join(destDir, fileName);
-                                        
-                                        await window.electronAPI.copyEntry(sourcePath, destPath);
-                                        await loadProject(projectRootPath);
-                                    }
-                                }}
-                            />;
-                        }
-                    } else if (tab.type === 'character' && tab.characterTag) {
-                        const char = analysisResultWithProfiles.characters.get(tab.characterTag);
-                        content = <CharacterEditorView 
-                            character={char} 
-                            onSave={handleUpdateCharacter}
-                            existingTags={Array.from(analysisResult.characters.keys())}
-                            projectImages={Array.from(images.values())}
-                            imageMetadata={imageMetadata}
-                        />;
-                    } else if (tab.type === 'scene-composer' && tab.sceneId) {
-                        const composition = sceneCompositions[tab.sceneId] || { background: null, sprites: [] };
-                        const name = sceneNames[tab.sceneId] || 'Scene';
-                        content = <SceneComposer 
-                            images={Array.from(images.values())}
-                            metadata={imageMetadata}
-                            scene={composition}
-                            onSceneChange={(val) => handleSceneUpdate(tab.sceneId!, val)}
-                            sceneName={name}
-                            onRenameScene={(newName) => handleRenameScene(tab.sceneId!, newName)}
-                        />;
-                    }
+            {/* SASH between panes */}
+            {splitLayout !== 'none' && (
+              <Sash
+                direction={splitLayout === 'right' ? 'horizontal' : 'vertical'}
+                onDrag={(delta) => setSplitPrimarySize(prev => Math.max(200, prev + delta))}
+              />
+            )}
 
-                    return (
-                        <div key={tab.id} className="w-full h-full absolute" style={{ visibility: isActive ? 'visible' : 'hidden' }}>
-                            {content}
-                        </div>
-                    );
-                })}
-            </div>
-            
-            <StatusBar
-                totalWords={useMemo(() => {
-                    return blocks.reduce((acc, b) => acc + countWordsInRenpyScript(b.content), 0);
-                }, [blocks])}
-                currentFileWords={useMemo(() => {
-                    if (activeTabId && activeTabId !== 'canvas') {
-                        const activeBlock = blocks.find(b => b.id === activeTabId);
-                        if (activeBlock) return countWordsInRenpyScript(activeBlock.content);
-                    }
-                    return null;
-                }, [blocks, activeTabId])}
-                readingTime={useMemo(() => {
-                    const totalWords = blocks.reduce((acc, b) => acc + countWordsInRenpyScript(b.content), 0);
-                    const minutes = Math.ceil(totalWords / 200);
-                    if (minutes < 60) return `${minutes} min read`;
-                    const hours = Math.floor(minutes / 60);
-                    const mins = minutes % 60;
-                    return `${hours}h ${mins}m read`;
-                }, [blocks])}
-                statusMessage={statusBarMessage}
-                version={APP_VERSION}
-                build={BUILD_NUMBER}
-            />
+            {/* SECONDARY PANE */}
+            {splitLayout !== 'none' && (
+              <div
+                className="flex-1 flex flex-col min-w-0 min-h-0"
+                onClick={() => activePaneId !== 'secondary' && setActivePaneId('secondary')}
+              >
+                {renderTabBar(secondaryOpenTabs, secondaryActiveTabId, 'secondary', secondaryTabBarRef)}
+                <div className="flex-grow relative overflow-hidden">
+                  {secondaryOpenTabs.map(tab => (
+                    <div key={tab.id} className="w-full h-full absolute" style={{ visibility: tab.id === secondaryActiveTabId ? 'visible' : 'hidden' }}>
+                        {renderTabContent(tab)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </div>{/* end panes container */}
+
+          <StatusBar
+              totalWords={useMemo(() => {
+                  return blocks.reduce((acc, b) => acc + countWordsInRenpyScript(b.content), 0);
+              }, [blocks])}
+              currentFileWords={useMemo(() => {
+                  if (activeTabId && activeTabId !== 'canvas') {
+                      const activeBlock = blocks.find(b => b.id === activeTabId);
+                      if (activeBlock) return countWordsInRenpyScript(activeBlock.content);
+                  }
+                  return null;
+              }, [blocks, activeTabId])}
+              readingTime={useMemo(() => {
+                  const totalWords = blocks.reduce((acc, b) => acc + countWordsInRenpyScript(b.content), 0);
+                  const minutes = Math.ceil(totalWords / 200);
+                  if (minutes < 60) return `${minutes} min read`;
+                  const hours = Math.floor(minutes / 60);
+                  const mins = minutes % 60;
+                  return `${hours}h ${mins}m read`;
+              }, [blocks])}
+              statusMessage={statusBarMessage}
+              version={APP_VERSION}
+              build={BUILD_NUMBER}
+              cursorPosition={(() => {
+                const focusedTabs = activePaneId === 'primary' ? openTabs : secondaryOpenTabs;
+                const focusedActiveId = activePaneId === 'primary' ? activeTabId : secondaryActiveTabId;
+                const focusedTab = focusedTabs.find(t => t.id === focusedActiveId);
+                return focusedTab?.type === 'editor' ? editorCursorPosition : null;
+              })()}
+          />
+
         </div>
 
         {/* Right Sidebar */}
@@ -3013,12 +3143,17 @@ const App: React.FC = () => {
               x={contextMenuInfo.x}
               y={contextMenuInfo.y}
               tabId={contextMenuInfo.tabId}
+              paneId={contextMenuInfo.paneId}
+              splitLayout={splitLayout}
               onClose={() => setContextMenuInfo(null)}
-              onCloseTab={handleCloseTab}
-              onCloseOthers={handleCloseOthersRequest}
-              onCloseLeft={handleCloseLeftRequest}
-              onCloseRight={handleCloseRightRequest}
-              onCloseAll={handleCloseAllRequest}
+              onCloseTab={(id) => handleCloseTab(id, contextMenuInfo.paneId)}
+              onCloseOthers={(id) => handleCloseOthersRequest(id, contextMenuInfo.paneId)}
+              onCloseLeft={(id) => handleCloseLeftRequest(id, contextMenuInfo.paneId)}
+              onCloseRight={(id) => handleCloseRightRequest(id, contextMenuInfo.paneId)}
+              onCloseAll={() => handleCloseAllRequest(contextMenuInfo.paneId)}
+              onSplitRight={(id) => handleOpenInSplit(id, 'right')}
+              onSplitBottom={(id) => handleOpenInSplit(id, 'bottom')}
+              onMoveToOtherPane={(id) => handleMoveToOtherPane(id, contextMenuInfo.paneId)}
           />,
           document.body
       )}
