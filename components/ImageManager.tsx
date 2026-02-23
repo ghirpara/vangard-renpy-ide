@@ -25,7 +25,8 @@ const GAP = 12;
 
 const ImageManager: React.FC<ImageManagerProps> = ({ images, metadata, scanDirectories, onAddScanDirectory, onRemoveScanDirectory, onCopyImagesToProject, onOpenImageEditor, isFileSystemApiSupported, lastScanned, isRefreshing, onRefresh, onCreatePlaceholder }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSource, setSelectedSource] = useState('all');
+  const [selectedSource, setSelectedSource] = useState('Project');
+  const [hideGuiAssets, setHideGuiAssets] = useState(true);
   const [selectedImagePaths, setSelectedImagePaths] = useState(new Set<string>());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; image: ProjectImage } | null>(null);
 
@@ -34,7 +35,7 @@ const ImageManager: React.FC<ImageManagerProps> = ({ images, metadata, scanDirec
   const [scrollTop, setScrollTop] = useState(0);
 
   const sources = useMemo(() => {
-    return ['all', 'Project (game/images)', ...scanDirectories];
+    return ['all', 'Project', ...scanDirectories];
   }, [scanDirectories]);
 
   useEffect(() => {
@@ -48,8 +49,15 @@ const ImageManager: React.FC<ImageManagerProps> = ({ images, metadata, scanDirec
     let visibleImages = images;
     
     if (selectedSource !== 'all') {
-      if (selectedSource === 'Project (game/images)') {
-        visibleImages = visibleImages.filter(img => img.isInProject);
+      if (selectedSource === 'Project') {
+        visibleImages = visibleImages.filter(img => {
+          if (!img.isInProject) return false;
+          if (hideGuiAssets) {
+            const normalizedPath = img.filePath.replace(/\\/g, '/');
+            if (normalizedPath.includes('/gui/')) return false;
+          }
+          return true;
+        });
       } else {
         // Normalize selectedSource to match internal forward-slash paths
         const normalizedSource = selectedSource.replace(/\\/g, '/').replace(/\/$/, '');
@@ -74,7 +82,7 @@ const ImageManager: React.FC<ImageManagerProps> = ({ images, metadata, scanDirec
         );
     }
     return visibleImages;
-  }, [images, metadata, searchTerm, selectedSource]);
+  }, [images, metadata, searchTerm, selectedSource, hideGuiAssets]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -204,11 +212,11 @@ const ImageManager: React.FC<ImageManagerProps> = ({ images, metadata, scanDirec
                 >
                     {sources.map(source => (
                     <option key={source} value={source}>
-                        {source === 'Project (game/images)' ? 'Project Images' : source}
+                        {source === 'Project' ? 'Project Images' : source}
                     </option>
                     ))}
                 </select>
-                {selectedSource !== 'all' && selectedSource !== 'Project (game/images)' && (
+                {selectedSource !== 'all' && selectedSource !== 'Project' && (
                     <button
                         onClick={() => onRemoveScanDirectory(selectedSource)}
                         className="p-2 rounded-md hover:bg-red-200 dark:hover:bg-red-800/50 text-gray-500 dark:text-gray-400 hover:text-red-700 dark:hover:text-red-300 flex-shrink-0"
@@ -218,6 +226,17 @@ const ImageManager: React.FC<ImageManagerProps> = ({ images, metadata, scanDirec
                     </button>
                 )}
             </div>
+            {selectedSource === 'Project' && (
+                <label className="flex items-center gap-2 mt-2 cursor-pointer text-xs text-gray-500 dark:text-gray-400 select-none">
+                    <input
+                        type="checkbox"
+                        checked={!hideGuiAssets}
+                        onChange={e => setHideGuiAssets(!e.target.checked)}
+                        className="h-3.5 w-3.5 rounded"
+                    />
+                    Show UI assets (gui/)
+                </label>
+            )}
             <div className="flex space-x-2 mt-2">
                 <button
                     onClick={onAddScanDirectory}
