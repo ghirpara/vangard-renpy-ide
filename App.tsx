@@ -19,21 +19,25 @@ import ImageEditorView from './components/ImageEditorView';
 import AudioEditorView from './components/AudioEditorView';
 import CharacterEditorView from './components/CharacterEditorView';
 import SceneComposer from './components/SceneComposer';
+import MarkdownPreviewView from './components/MarkdownPreviewView';
 import PunchlistManager from './components/PunchlistManager';
 import TabContextMenu from './components/TabContextMenu';
 import Sash from './components/Sash';
 import StatusBar from './components/StatusBar';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
 import AboutModal from './components/AboutModal';
+import UserSnippetModal from './components/UserSnippetModal';
+import { SearchProvider } from './contexts/SearchContext';
 import AIGeneratorView from './components/AIGeneratorView';
 import StatsView from './components/StatsView';
 import { useRenpyAnalysis, performRenpyAnalysis, performRouteAnalysis } from './hooks/useRenpyAnalysis';
 import { useHistory } from './hooks/useHistory';
-import type { 
-  Block, BlockGroup, Link, Position, FileSystemTreeNode, EditorTab, 
-  ToastMessage, IdeSettings, Theme, ProjectImage, RenpyAudio, 
+import type {
+  Block, BlockGroup, Link, Position, FileSystemTreeNode, EditorTab,
+  ToastMessage, IdeSettings, Theme, ProjectImage, RenpyAudio,
   ClipboardState, ImageMetadata, AudioMetadata, LabelNode, Character,
-  AppSettings, ProjectSettings, StickyNote, SearchResult, SceneComposition, SceneSprite, PunchlistMetadata, MouseGestureSettings
+  AppSettings, ProjectSettings, StickyNote, SceneComposition, SceneSprite, PunchlistMetadata, MouseGestureSettings,
+  ProjectLoadResult, ScannedImageAsset, ScannedAudioAsset, SerializedSprite, SerializedSceneComposition, UserSnippet
 } from './types';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import packageJson from './package.json';
@@ -402,6 +406,10 @@ const App: React.FC = () => {
   const [isGameRunning, setIsGameRunning] = useState(false);
   const [showConfigureRenpyModal, setShowConfigureRenpyModal] = useState(false);
 
+  // --- State: User Snippet Modal ---
+  const [userSnippetModalOpen, setUserSnippetModalOpen] = useState(false);
+  const [editingSnippet, setEditingSnippet] = useState<UserSnippet | null>(null);
+
   // --- State: Application and Project Settings ---
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [appSettingsLoaded, setAppSettingsLoaded] = useState(false);
@@ -437,18 +445,8 @@ const App: React.FC = () => {
   // --- State: Route Canvas ---
   const [routeNodeLayoutCache, setRouteNodeLayoutCache] = useState<Map<string, Position>>(new Map());
 
-  // --- State: Search ---
+  // --- State: Search (panel toggle remains here; query/results live in SearchContext) ---
   const [activeLeftPanel, setActiveLeftPanel] = useState<'explorer' | 'search'>('explorer');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [replaceQuery, setReplaceQuery] = useState('');
-  const [searchOptions, setSearchOptions] = useImmer({
-    isCaseSensitive: false,
-    isWholeWord: false,
-    isRegex: false,
-  });
-  const [searchResults, setSearchResults] = useImmer<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [replaceAllConfirmInfo, setReplaceAllConfirmInfo] = useState<{ onConfirm: () => void; totalMatches: number; totalFiles: number; } | null>(null);
 
   // --- Analysis ---
   const analysisResult = useRenpyAnalysis(blocks, 0); // 0 is a trigger for force re-analysis if needed
@@ -675,12 +673,14 @@ const App: React.FC = () => {
     if (window.electronAPI?.getAppSettings) {
       window.electronAPI.getAppSettings().then(savedSettings => {
         if (savedSettings) {
-          updateAppSettings(draft => { 
+          updateAppSettings(draft => {
               Object.assign(draft, savedSettings);
               if (!draft.editorFontFamily) draft.editorFontFamily = "'Consolas', 'Courier New', monospace";
               if (!draft.editorFontSize) draft.editorFontSize = 14;
           });
         }
+      }).catch(err => {
+        console.error('Failed to load app settings:', err);
       }).finally(() => {
         setAppSettingsLoaded(true);
       });
@@ -709,7 +709,8 @@ const App: React.FC = () => {
             if (!result || !result.success) {
                 console.error('Failed to save app settings:', result?.error);
             }
-        });
+        })
+        .catch(err => console.error('Failed to save app settings:', err));
     } else {
       localStorage.setItem('renpy-ide-app-settings', JSON.stringify(appSettings));
     }
@@ -752,7 +753,7 @@ const App: React.FC = () => {
   // --- Check Ren'Py Path Validity ---
   useEffect(() => {
     if (window.electronAPI?.checkRenpyPath && appSettings.renpyPath) {
-      window.electronAPI.checkRenpyPath(appSettings.renpyPath).then(setIsRenpyPathValid);
+      window.electronAPI.checkRenpyPath(appSettings.renpyPath).then(setIsRenpyPathValid).catch(() => setIsRenpyPathValid(false));
     } else {
       setIsRenpyPathValid(false);
     }
@@ -891,7 +892,7 @@ const App: React.FC = () => {
                 const errorMsg = typeof res.error === 'string' ? res.error : 'Unknown error occurred during file creation';
                 throw new Error(errorMsg);
             }
-        } catch (e: any) {
+        } catch (e) {
             console.error(e);
             const errorMessage = e instanceof Error ? e.message : String(e);
             addToast(`Failed to create file: ${errorMessage}`, 'error');
@@ -936,7 +937,7 @@ const App: React.FC = () => {
                   const errorMsg = typeof res.error === 'string' ? res.error : 'Unknown error occurred during file creation';
                   throw new Error(errorMsg);
               }
-          } catch(e: any) {
+          } catch(e) {
               console.error(e);
               const errorMessage = e instanceof Error ? e.message : String(e);
               addToast(`Failed to create file: ${errorMessage}`, 'error');
@@ -1130,7 +1131,7 @@ const App: React.FC = () => {
               if (b.filePath) existingBlocksMap.set(b.filePath, b);
           });
 
-          const loadedBlocks: Block[] = projectData.files.map((f: any, index: number) => {
+          const loadedBlocks: Block[] = projectData.files.map((f, index) => {
               const existing = existingBlocksMap.get(f.path);
               return {
                   id: existing ? existing.id : `block-${index}-${Date.now()}`,
@@ -1180,7 +1181,7 @@ const App: React.FC = () => {
           setFileSystemTree(projectData.tree);
           
           const imgMap = new Map<string, ProjectImage>();
-          projectData.images.forEach((img: any) => {
+          projectData.images.forEach((img) => {
               imgMap.set(img.path, { 
                   ...img, 
                   filePath: img.path,
@@ -1192,7 +1193,7 @@ const App: React.FC = () => {
           setImages(imgMap);
 
           const audioMap = new Map<string, RenpyAudio>();
-          projectData.audios.forEach((aud: any) => {
+          projectData.audios.forEach((aud) => {
               audioMap.set(aud.path, { 
                   ...aud, 
                   filePath: aud.path,
@@ -1215,7 +1216,7 @@ const App: React.FC = () => {
               
               // Load Scene Compositions
               // Helper to link saved paths back to loaded image objects
-              const rehydrateSprite = (s: any) => {
+              const rehydrateSprite = (s: SerializedSprite): SceneSprite => {
                   const path = s.image.filePath;
                   // Try to find the image in the project images map
                   // If not found (e.g. was external), create a placeholder. 
@@ -1229,15 +1230,15 @@ const App: React.FC = () => {
                   return { ...s, image: img };
               };
 
-              const rehydrateScene = (sc: any) => ({
+              const rehydrateScene = (sc: SerializedSceneComposition): SceneComposition => ({
                   background: sc.background ? rehydrateSprite(sc.background) : null,
                   sprites: (sc.sprites || []).map(rehydrateSprite)
               });
 
               if (projectData.settings.sceneCompositions) {
                   const restoredScenes: Record<string, SceneComposition> = {};
-                  Object.entries(projectData.settings.sceneCompositions as Record<string, any>).forEach(([id, sc]) => {
-                      const comp = sc as SceneComposition;
+                  Object.entries(projectData.settings.sceneCompositions).forEach(([id, sc]) => {
+                      const comp = sc as unknown as SerializedSceneComposition;
                       restoredScenes[id] = {
                           background: comp.background ? rehydrateSprite(comp.background) : null,
                           sprites: comp.sprites.map(rehydrateSprite)
@@ -1245,10 +1246,10 @@ const App: React.FC = () => {
                   });
                   setSceneCompositions(restoredScenes);
                   setSceneNames(projectData.settings.sceneNames || {});
-              } else if (projectData.settings.sceneComposition) {
-                  // Migration for legacy single scene
+              } else if ((projectData.settings as unknown as Record<string, unknown>).sceneComposition) {
+                  // Migration for legacy single scene (pre-multi-scene format)
                   const defaultId = 'scene-default';
-                  setSceneCompositions({ [defaultId]: rehydrateScene(projectData.settings.sceneComposition) });
+                  setSceneCompositions({ [defaultId]: rehydrateScene((projectData.settings as unknown as Record<string, unknown>).sceneComposition as SerializedSceneComposition) });
                   setSceneNames({ [defaultId]: 'Default Scene' });
               } else {
                   setSceneCompositions({});
@@ -1257,18 +1258,18 @@ const App: React.FC = () => {
 
               // Restore Scan Directories
               if (projectData.settings.scannedImagePaths) {
-                  const paths = (projectData.settings.scannedImagePaths || []) as string[];
+                  const paths = projectData.settings.scannedImagePaths;
                   const map = new Map<string, FileSystemDirectoryHandle>();
-                  paths.forEach((p: string) => map.set(p, {} as any));
+                  paths.forEach((p) => map.set(p, null as unknown as FileSystemDirectoryHandle));
                   setImageScanDirectories(map);
-                  
+
                   // Trigger scan
                   if (window.electronAPI) {
-                       paths.forEach((dirPath: string) => {
+                       paths.forEach((dirPath) => {
                            window.electronAPI!.scanDirectory(dirPath).then(({ images: scanned }) => {
                                setImages(prev => {
                                    const next = new Map(prev);
-                                   scanned.forEach((img: any) => {
+                                   scanned.forEach((img) => {
                                        if (!next.has(img.path)) {
                                            // Check if this file exists in the project
                                            const fileName = img.path.split('/').pop();
@@ -1293,18 +1294,18 @@ const App: React.FC = () => {
               }
               
               if (projectData.settings.scannedAudioPaths) {
-                  const paths = (projectData.settings.scannedAudioPaths || []) as string[];
+                  const paths = projectData.settings.scannedAudioPaths;
                   const map = new Map<string, FileSystemDirectoryHandle>();
-                  paths.forEach((p: string) => map.set(p, {} as any));
+                  paths.forEach((p) => map.set(p, null as unknown as FileSystemDirectoryHandle));
                   setAudioScanDirectories(map);
 
                   // Trigger scan
                   if (window.electronAPI) {
-                       paths.forEach((dirPath: string) => {
+                       paths.forEach((dirPath) => {
                            window.electronAPI!.scanDirectory(dirPath).then(({ audios: scanned }) => {
                                setAudios(prev => {
                                    const next = new Map(prev);
-                                   scanned.forEach((aud: any) => {
+                                   scanned.forEach((aud) => {
                                        if (!next.has(aud.path)) {
                                            // Check if this file exists in the project
                                            const fileName = aud.path.split('/').pop();
@@ -1348,6 +1349,9 @@ const App: React.FC = () => {
                       // We allow opening even if not strictly in state yet (might be migrated)
                       return true;
                   }
+                  if (tab.type === 'markdown' && tab.filePath) {
+                      return true; // File existence checked on tab render
+                  }
                   return tab.type === 'canvas' || tab.type === 'route-canvas' || tab.type === 'punchlist' || tab.type === 'ai-generator' || tab.type === 'stats';
               });
 
@@ -1378,6 +1382,7 @@ const App: React.FC = () => {
                   if (tab.type === 'image' && tab.filePath) return imgMap.has(tab.filePath);
                   if (tab.type === 'audio' && tab.filePath) return audioMap.has(tab.filePath);
                   if (tab.type === 'character' && tab.characterTag) return tempAnalysis.characters.has(tab.characterTag);
+                  if (tab.type === 'markdown' && tab.filePath) return true;
                   return tab.type === 'canvas' || tab.type === 'route-canvas' || tab.type === 'punchlist' || tab.type === 'ai-generator' || tab.type === 'stats' || tab.type === 'scene-composer';
               });
               setSplitLayout(validSecondary.length > 0 ? savedSplitLayout : 'none');
@@ -1440,15 +1445,20 @@ const App: React.FC = () => {
   // Checks whether the selected folder looks like a Ren'Py project before loading.
   // If it doesn't (no game/ folder, no .rpy files), shows a confirmation warning first.
   const handleOpenWithRenpyCheck = useCallback(async (path: string) => {
-      if (window.electronAPI?.checkRenpyProject) {
-          const check = await window.electronAPI.checkRenpyProject(path);
-          if (!check.isRenpyProject) {
-              setNonRenpyWarningPath(path);
-              return;
+      try {
+          if (window.electronAPI?.checkRenpyProject) {
+              const check = await window.electronAPI.checkRenpyProject(path);
+              if (!check.isRenpyProject) {
+                  setNonRenpyWarningPath(path);
+                  return;
+              }
           }
+          await loadProject(path);
+      } catch (err) {
+          console.error('Failed to open project:', err);
+          addToast('Failed to open project', 'error');
       }
-      await loadProject(path);
-  }, [loadProject]);
+  }, [loadProject, addToast]);
 
   const handleOpenProjectFolder = useCallback(async () => {
     try {
@@ -1486,6 +1496,7 @@ const App: React.FC = () => {
   const updateDraftingArtifacts = useCallback(async () => {
       if (!projectRootPath || !window.electronAPI || !projectSettings.draftingMode) return;
 
+      try {
       const missingImages = new Set<string>();
       const missingAudioFiles = new Set<string>();
       const missingAudioVariables = new Set<string>();
@@ -1612,19 +1623,23 @@ const App: React.FC = () => {
       const rpyPath = await window.electronAPI.path.join(projectRootPath as string, 'game/debug_placeholders.rpy');
       await window.electronAPI.writeFile(rpyPath, rpyContent);
 
+      } catch (err) {
+          console.error('Failed to update drafting artifacts:', err);
+      }
   }, [blocks, projectRootPath, projectSettings.draftingMode, analysisResult.definedImages, analysisResult.variables, existingImageTags, existingAudioPaths]);
 
   const cleanupDraftingArtifacts = useCallback(async () => {
       if (!projectRootPath || !window.electronAPI) return;
-      
-      const rpyPath = await window.electronAPI.path.join(String(projectRootPath), 'game/debug_placeholders.rpy') as string;
-      // We can remove it or rename to .disabled
-      await window.electronAPI.removeEntry(rpyPath);
 
-      // Also remove the compiled .rpyc file to ensure Ren'Py stops using placeholders
-      const rpycPath = await window.electronAPI.path.join(String(projectRootPath), 'game/debug_placeholders.rpyc') as string;
-      await window.electronAPI.removeEntry(rpycPath);
-      
+      try {
+          const rpyPath = await window.electronAPI.path.join(String(projectRootPath), 'game/debug_placeholders.rpy') as string;
+          await window.electronAPI.removeEntry(rpyPath);
+
+          const rpycPath = await window.electronAPI.path.join(String(projectRootPath), 'game/debug_placeholders.rpyc') as string;
+          await window.electronAPI.removeEntry(rpycPath);
+      } catch (err) {
+          console.error('Failed to clean up drafting artifacts:', err);
+      }
       // We leave the renide_assets folder as it might contain valid cache or be reused
   }, [projectRootPath]);
 
@@ -1666,8 +1681,9 @@ const App: React.FC = () => {
     if (!editor) return;
 
     const contentToSave = editor.getValue();
-    
+
     // Save to disk first
+    try {
     if (window.electronAPI && projectRootPath) {
         const block = blocksRef.current.find(b => b.id === blockId);
         if (block && block.filePath) {
@@ -1702,23 +1718,26 @@ const App: React.FC = () => {
         updateDraftingArtifacts();
     }
 
+    } catch (err) {
+        console.error('Failed to save block:', err);
+        addToast('Failed to save file', 'error');
+    }
   }, [projectRootPath, projectSettings.draftingMode, addToast, setBlocks, updateDraftingArtifacts]);
   
   const handleSaveProjectSettings = useCallback(async () => {
     if (!projectRootPath || !window.electronAPI) return;
     try {
       // Serialize scenes: map images to just their paths to avoid circular refs and huge files
-      const serializeSprite = (s: any) => ({
+      const serializeSprite = (s: SceneSprite): SerializedSprite => ({
           ...s,
           image: { filePath: s.image.filePath }
       });
 
-      const serializableScenes: Record<string, any> = {};
+      const serializableScenes: Record<string, SerializedSceneComposition> = {};
       Object.entries(sceneCompositions).forEach(([id, sc]) => {
-          const comp = sc as SceneComposition;
           serializableScenes[id] = {
-              background: comp.background ? serializeSprite(comp.background) : null,
-              sprites: comp.sprites.map(serializeSprite)
+              background: sc.background ? serializeSprite(sc.background) : null,
+              sprites: sc.sprites.map(serializeSprite)
           };
       });
 
@@ -1733,7 +1752,7 @@ const App: React.FC = () => {
         stickyNotes: Array.from(stickyNotes),
         characterProfiles,
         punchlistMetadata,
-        sceneCompositions: serializableScenes,
+        sceneCompositions: serializableScenes as unknown as Record<string, SceneComposition>,
         sceneNames,
         scannedImagePaths: Array.from(imageScanDirectories.keys()),
         scannedAudioPaths: Array.from(audioScanDirectories.keys()),
@@ -1892,6 +1911,20 @@ const App: React.FC = () => {
     }
   }, [openTabs, secondaryOpenTabs, activePaneId, splitLayout]);
 
+  const handleOpenMarkdownTab = useCallback((filePath: string) => {
+    const tabId = `md-${filePath}`;
+    if (openTabs.find(t => t.id === tabId)) { setActiveTabId(tabId); setActivePaneId('primary'); return; }
+    if (secondaryOpenTabs.find(t => t.id === tabId)) { setSecondaryActiveTabId(tabId); setActivePaneId('secondary'); return; }
+    const newTab: EditorTab = { id: tabId, type: 'markdown', filePath };
+    if (activePaneId === 'secondary' && splitLayout !== 'none') {
+        setSecondaryOpenTabs(prev => [...prev, newTab]);
+        setSecondaryActiveTabId(tabId);
+    } else {
+        setOpenTabs(prev => [...prev, newTab]);
+        setActiveTabId(tabId);
+    }
+  }, [openTabs, secondaryOpenTabs, activePaneId, splitLayout]);
+
   const handlePathDoubleClick = useCallback((filePath: string) => {
     const imageExtensions = ['.png', '.jpg', '.jpeg', '.webp'];
     const lowerFilePath = filePath.toLowerCase();
@@ -1903,8 +1936,10 @@ const App: React.FC = () => {
       }
     } else if (imageExtensions.some(ext => lowerFilePath.endsWith(ext))) {
       handleOpenImageEditorTab(filePath);
+    } else if (lowerFilePath.endsWith('.md')) {
+      handleOpenMarkdownTab(filePath);
     }
-  }, [blocks, handleOpenEditor, handleOpenImageEditorTab]);
+  }, [blocks, handleOpenEditor, handleOpenImageEditorTab, handleOpenMarkdownTab]);
 
   const handleCloseTab = useCallback((tabId: string, paneId: 'primary' | 'secondary', e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -2410,33 +2445,43 @@ const App: React.FC = () => {
 
   const handleCreateNode = useCallback(async (parentPath: string, name: string, type: 'file' | 'folder') => {
     if (!window.electronAPI || !projectRootPath) return;
-    const fullPath = await window.electronAPI.path.join(projectRootPath, parentPath, name);
-    if (type === 'folder') {
-        await window.electronAPI.createDirectory(fullPath);
-    } else {
-        await window.electronAPI.writeFile(fullPath, '');
-        
-        // If it's an .rpy file, create a corresponding block
-        if (name.toLowerCase().endsWith('.rpy')) {
-            const relativePath = parentPath ? `${parentPath}/${name}` : name;
-            const content = ''; // Empty content for newly created files
-            addBlock(relativePath, content);
-            addToast(`Created block for ${name}`, 'success');
+    try {
+        const fullPath = await window.electronAPI.path.join(projectRootPath, parentPath, name);
+        if (type === 'folder') {
+            await window.electronAPI.createDirectory(fullPath);
+        } else {
+            await window.electronAPI.writeFile(fullPath, '');
+
+            // If it's an .rpy file, create a corresponding block
+            if (name.toLowerCase().endsWith('.rpy')) {
+                const relativePath = parentPath ? `${parentPath}/${name}` : name;
+                const content = ''; // Empty content for newly created files
+                addBlock(relativePath, content);
+                addToast(`Created block for ${name}`, 'success');
+            }
         }
+        const projData = await window.electronAPI.loadProject(projectRootPath);
+        setFileSystemTree(projData.tree);
+    } catch (err) {
+        console.error('Failed to create file/folder:', err);
+        addToast(`Failed to create ${type}: ${name}`, 'error');
     }
-    const projData = await window.electronAPI.loadProject(projectRootPath);
-    setFileSystemTree(projData.tree);
   }, [projectRootPath, addBlock, addToast]);
 
   const handleRenameNode = useCallback(async (oldPath: string, newName: string) => {
       if (!window.electronAPI || !projectRootPath) return;
-      const fullOldPath = await window.electronAPI.path.join(projectRootPath, oldPath) as string;
-      const parentDir = oldPath.split('/').slice(0, -1).join('/');
-      const fullNewPath = await window.electronAPI.path.join(projectRootPath, parentDir, newName) as string;
-      await window.electronAPI.moveFile(fullOldPath, fullNewPath);
-      const projData = await window.electronAPI.loadProject(projectRootPath);
-      setFileSystemTree(projData.tree);
-  }, [projectRootPath]);
+      try {
+          const fullOldPath = await window.electronAPI.path.join(projectRootPath, oldPath) as string;
+          const parentDir = oldPath.split('/').slice(0, -1).join('/');
+          const fullNewPath = await window.electronAPI.path.join(projectRootPath, parentDir, newName) as string;
+          await window.electronAPI.moveFile(fullOldPath, fullNewPath);
+          const projData = await window.electronAPI.loadProject(projectRootPath);
+          setFileSystemTree(projData.tree);
+      } catch (err) {
+          console.error('Failed to rename:', err);
+          addToast('Failed to rename file', 'error');
+      }
+  }, [projectRootPath, addToast]);
 
   const handleDeleteNode = useCallback(async (paths: string[]) => {
       if (!window.electronAPI || !projectRootPath) return;
@@ -2451,27 +2496,32 @@ const App: React.FC = () => {
       setDeleteConfirmInfo({
           paths,
           onConfirm: async () => {
-              // Delete the files
-              for (const p of paths) {
-                  const fullPath = await window.electronAPI.path.join(projectRootPath, p) as string;
-                  await window.electronAPI.removeEntry(fullPath);
-              }
-              
-              // Remove corresponding blocks for .rpy files
-              blocksToDelete.forEach(block => {
-                  if (block) {
-                      deleteBlock(block.id);
-                      addToast(`Removed block for ${block.filePath}`, 'info');
+              try {
+                  // Delete the files
+                  for (const p of paths) {
+                      const fullPath = await window.electronAPI.path.join(projectRootPath, p) as string;
+                      await window.electronAPI.removeEntry(fullPath);
                   }
-              });
-              
-              const projData = await window.electronAPI.loadProject(projectRootPath);
-              setFileSystemTree(projData.tree);
-              
-              if (blocksToDelete.length > 0) {
-                  addToast(`Deleted ${paths.length} file(s) and removed ${blocksToDelete.length} block(s)`, 'success');
-              } else {
-                  addToast(`Deleted ${paths.length} file(s)`, 'success');
+
+                  // Remove corresponding blocks for .rpy files
+                  blocksToDelete.forEach(block => {
+                      if (block) {
+                          deleteBlock(block.id);
+                          addToast(`Removed block for ${block.filePath}`, 'info');
+                      }
+                  });
+
+                  const projData = await window.electronAPI.loadProject(projectRootPath);
+                  setFileSystemTree(projData.tree);
+
+                  if (blocksToDelete.length > 0) {
+                      addToast(`Deleted ${paths.length} file(s) and removed ${blocksToDelete.length} block(s)`, 'success');
+                  } else {
+                      addToast(`Deleted ${paths.length} file(s)`, 'success');
+                  }
+              } catch (err) {
+                  console.error('Failed to delete:', err);
+                  addToast('Failed to delete file(s)', 'error');
               }
           }
       });
@@ -2479,40 +2529,49 @@ const App: React.FC = () => {
 
   const handleMoveNode = useCallback(async (sourcePaths: string[], targetPath: string) => {
       if (!window.electronAPI || !projectRootPath) return;
-      const fullTargetDir = await window.electronAPI.path.join(projectRootPath, targetPath);
-      for (const p of sourcePaths) {
-          const fullSource = await window.electronAPI.path.join(projectRootPath, p);
-          const fileName = p.split('/').pop() || '';
-          const fullDest = await window.electronAPI.path.join(fullTargetDir, fileName);
-          await window.electronAPI.moveFile(fullSource, fullDest);
+      try {
+          const fullTargetDir = await window.electronAPI.path.join(projectRootPath, targetPath);
+          for (const p of sourcePaths) {
+              const fullSource = await window.electronAPI.path.join(projectRootPath, p);
+              const fileName = p.split('/').pop() || '';
+              const fullDest = await window.electronAPI.path.join(fullTargetDir, fileName);
+              await window.electronAPI.moveFile(fullSource, fullDest);
+          }
+          const projData = await window.electronAPI.loadProject(projectRootPath);
+          setFileSystemTree(projData.tree);
+      } catch (err) {
+          console.error('Failed to move file(s):', err);
+          addToast('Failed to move file(s)', 'error');
       }
-      const projData = await window.electronAPI.loadProject(projectRootPath);
-      setFileSystemTree(projData.tree);
-  }, [projectRootPath]);
+  }, [projectRootPath, addToast]);
 
   const handleCut = useCallback((paths: string[]) => setClipboard({ type: 'cut', paths: new Set(paths) }), []);
   const handleCopy = useCallback((paths: string[]) => setClipboard({ type: 'copy', paths: new Set(paths) }), []);
   const handlePaste = useCallback(async (targetPath: string) => {
       if (!clipboard || !window.electronAPI || !projectRootPath) return;
-      
-      const fullTargetDir = await window.electronAPI.path.join(projectRootPath!, targetPath);
-      
-      for (const p of clipboard.paths) {
-          const fullSource = await window.electronAPI.path.join(projectRootPath!, p);
-          const fileName = p.split('/').pop() || '';
-          const fullDest = await window.electronAPI.path.join(fullTargetDir, fileName);
-          
-          if (clipboard.type === 'cut') {
-              await window.electronAPI.moveFile(fullSource, fullDest);
-          } else {
-              await window.electronAPI.copyEntry(fullSource, fullDest);
+      try {
+          const fullTargetDir = await window.electronAPI.path.join(projectRootPath!, targetPath);
+
+          for (const p of clipboard.paths) {
+              const fullSource = await window.electronAPI.path.join(projectRootPath!, p);
+              const fileName = p.split('/').pop() || '';
+              const fullDest = await window.electronAPI.path.join(fullTargetDir, fileName);
+
+              if (clipboard.type === 'cut') {
+                  await window.electronAPI.moveFile(fullSource, fullDest);
+              } else {
+                  await window.electronAPI.copyEntry(fullSource, fullDest);
+              }
           }
+
+          if (clipboard.type === 'cut') setClipboard(null);
+          const projData = await window.electronAPI.loadProject(projectRootPath);
+          setFileSystemTree(projData.tree);
+      } catch (err) {
+          console.error('Failed to paste:', err);
+          addToast('Failed to paste file(s)', 'error');
       }
-      
-      if (clipboard.type === 'cut') setClipboard(null);
-      const projData = await window.electronAPI.loadProject(projectRootPath);
-      setFileSystemTree(projData.tree);
-  }, [clipboard, projectRootPath]);
+  }, [clipboard, projectRootPath, addToast]);
 
   const snippetCategoriesState = appSettings.snippetCategoriesState || {};
   const handleToggleSnippetCategory = (name: string, isOpen: boolean) => {
@@ -2520,6 +2579,28 @@ const App: React.FC = () => {
           if (!draft.snippetCategoriesState) draft.snippetCategoriesState = {};
           draft.snippetCategoriesState[name] = isOpen;
       });
+  };
+
+  // --- User Snippet CRUD ---
+  const handleSaveSnippet = (snippet: UserSnippet) => {
+      updateAppSettings(draft => {
+          if (!draft.userSnippets) draft.userSnippets = [];
+          const idx = draft.userSnippets.findIndex(s => s.id === snippet.id);
+          if (idx >= 0) {
+              draft.userSnippets[idx] = snippet;
+          } else {
+              draft.userSnippets.push(snippet);
+          }
+      });
+      setHasUnsavedSettings(true);
+  };
+  const handleDeleteSnippet = (snippetId: string) => {
+      updateAppSettings(draft => {
+          if (draft.userSnippets) {
+              draft.userSnippets = draft.userSnippets.filter(s => s.id !== snippetId);
+          }
+      });
+      setHasUnsavedSettings(true);
   };
 
   // --- Menu Command Handling ---
@@ -2602,7 +2683,11 @@ const App: React.FC = () => {
               confirmText: 'Save & Exit',
               dontSaveText: "Don't Save",
               onConfirm: async () => {
-                  await handleSaveAllRef.current();
+                  try {
+                      await handleSaveAllRef.current();
+                  } catch (err) {
+                      console.error('Failed to save before exit:', err);
+                  }
                   window.electronAPI!.ideStateSavedForQuit();
               },
               onDontSave: () => {
@@ -2615,7 +2700,11 @@ const App: React.FC = () => {
       });
 
       const removeSaveState = window.electronAPI.onSaveIdeStateBeforeQuit(async () => {
-          await handleSaveProjectSettingsRef.current();
+          try {
+              await handleSaveProjectSettingsRef.current();
+          } catch (err) {
+              console.error('Failed to save IDE state before quit:', err);
+          }
           window.electronAPI!.ideStateSavedForQuit();
       });
 
@@ -2636,6 +2725,7 @@ const App: React.FC = () => {
     if (tab.type === 'scene-composer') return sceneNames[tab.sceneId!] || 'Scene';
     if (tab.type === 'character') return `Char: ${analysisResult.characters.get(tab.characterTag!)?.name || tab.characterTag}`;
     if (tab.type === 'editor') return blocks.find(b => b.id === tab.blockId)?.title || 'Untitled';
+    if (tab.type === 'markdown') return tab.filePath?.split('/').pop() ?? 'Markdown';
     return tab.filePath?.split('/').pop() ?? 'Untitled';
   };
 
@@ -2688,6 +2778,7 @@ const App: React.FC = () => {
         onSwitchFocusBlock={handleOpenEditor} onSave={(id, content) => updateBlock(id, { content })}
         onTriggerSave={handleSaveBlock}
         onDirtyChange={(id, dirty) => { setDirtyEditors(prev => { const next = new Set(prev); if (dirty) { next.add(id); } else { next.delete(id); } return next; }); }}
+        onContentChange={(id, content) => { setBlocks(prev => prev.map(b => b.id === id ? { ...b, content } : b)); }}
         editorTheme={appSettings.theme.includes('dark') ? 'dark' : 'light'} editorFontFamily={appSettings.editorFontFamily}
         editorFontSize={appSettings.editorFontSize} enableAiFeatures={projectSettings.enableAiFeatures}
         availableModels={AVAILABLE_MODELS} selectedModel={projectSettings.selectedModel} addToast={addToast}
@@ -2695,6 +2786,7 @@ const App: React.FC = () => {
         onEditorUnmount={(id) => { const editor = editorInstances.current.get(id); if (editor) { const block = blocksRef.current.find(b => b.id === id); if (block && editor.getValue() !== block.content) { syncEditorToStateAndMarkDirty(id, editor.getValue()); } } editorInstances.current.delete(id); }}
         onCursorPositionChange={setEditorCursorPosition}
         draftingMode={projectSettings.draftingMode} existingImageTags={existingImageTags} existingAudioPaths={existingAudioPaths}
+        userSnippets={appSettings.userSnippets}
       />;
     }
     if (tab.type === 'image' && tab.filePath) {
@@ -2702,7 +2794,7 @@ const App: React.FC = () => {
       if (img) { const meta = imageMetadata.get(img.projectFilePath || img.filePath); return <ImageEditorView
         image={img} allImages={Array.from(images.values())} metadata={meta}
         onUpdateMetadata={(path, newMeta) => { setImageMetadata(prev => { const next = new Map(prev); next.set(path, newMeta); return next; }); setHasUnsavedSettings(true); }}
-        onCopyToProject={async (sourcePath, meta) => { if (window.electronAPI && projectRootPath) { const fileName = sourcePath.split('/').pop() || 'image.png'; const subfolder = meta.projectSubfolder || ''; const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'images', subfolder); const destPath = await window.electronAPI.path.join(destDir, fileName); await window.electronAPI.copyEntry(sourcePath, destPath); await loadProject(projectRootPath); } }}
+        onCopyToProject={async (sourcePath, meta) => { try { if (window.electronAPI && projectRootPath) { const fileName = sourcePath.split('/').pop() || 'image.png'; const subfolder = meta.projectSubfolder || ''; const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'images', subfolder); const destPath = await window.electronAPI.path.join(destDir, fileName); await window.electronAPI.copyEntry(sourcePath, destPath); await loadProject(projectRootPath); } } catch (err) { console.error('Failed to copy image to project:', err); addToast('Failed to copy image to project', 'error'); } }}
       />; }
     }
     if (tab.type === 'audio' && tab.filePath) {
@@ -2710,7 +2802,7 @@ const App: React.FC = () => {
       if (aud) { const meta = audioMetadata.get(aud.projectFilePath || aud.filePath); return <AudioEditorView
         audio={aud} metadata={meta}
         onUpdateMetadata={(path, newMeta) => { setAudioMetadata(prev => { const next = new Map(prev); next.set(path, newMeta); return next; }); setHasUnsavedSettings(true); }}
-        onCopyToProject={async (sourcePath, meta) => { if (window.electronAPI && projectRootPath) { const fileName = sourcePath.split('/').pop() || 'audio.ogg'; const subfolder = meta.projectSubfolder || ''; const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'audio', subfolder); const destPath = await window.electronAPI.path.join(destDir, fileName); await window.electronAPI.copyEntry(sourcePath, destPath); await loadProject(projectRootPath); } }}
+        onCopyToProject={async (sourcePath, meta) => { try { if (window.electronAPI && projectRootPath) { const fileName = sourcePath.split('/').pop() || 'audio.ogg'; const subfolder = meta.projectSubfolder || ''; const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'audio', subfolder); const destPath = await window.electronAPI.path.join(destDir, fileName); await window.electronAPI.copyEntry(sourcePath, destPath); await loadProject(projectRootPath); } } catch (err) { console.error('Failed to copy audio to project:', err); addToast('Failed to copy audio to project', 'error'); } }}
       />; }
     }
     if (tab.type === 'character' && tab.characterTag) {
@@ -2727,6 +2819,14 @@ const App: React.FC = () => {
         images={Array.from(images.values())} metadata={imageMetadata} scene={composition}
         onSceneChange={(val) => handleSceneUpdate(tab.sceneId!, val)} sceneName={name}
         onRenameScene={(newName) => handleRenameScene(tab.sceneId!, newName)}
+      />;
+    }
+    if (tab.type === 'markdown' && tab.filePath) {
+      return <MarkdownPreviewView
+        filePath={tab.filePath}
+        projectRootPath={projectRootPath!}
+        editorTheme={appSettings.theme.includes('dark') ? 'dark' : 'light'}
+        addToast={addToast}
       />;
     }
     return null;
@@ -2754,7 +2854,7 @@ const App: React.FC = () => {
           >
             <span className="truncate flex-grow">{getTabLabel(tab)}</span>
             {tab.id !== 'canvas' && (
-              <button onClick={(e) => handleCloseTab(tab.id, paneId, e)} className="ml-2 opacity-0 group-hover:opacity-100 hover:text-red-500 rounded-full p-0.5">
+              <button onClick={(e) => handleCloseTab(tab.id, paneId, e)} aria-label="Close tab" className="ml-2 opacity-0 group-hover:opacity-100 hover:text-red-500 rounded-full p-0.5">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
               </button>
             )}
@@ -2810,6 +2910,12 @@ const App: React.FC = () => {
   );
 
   return (
+    <SearchProvider
+      blocks={blocks}
+      projectRootPath={projectRootPath}
+      addToast={addToast}
+      onOpenEditor={handleOpenEditor}
+    >
     <div className={`fixed inset-0 flex flex-col bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 ${appSettings.theme}`}>
       <Toolbar
         directoryHandle={directoryHandle}
@@ -2900,31 +3006,7 @@ const App: React.FC = () => {
                     onToggleExpand={handleToggleExpandExplorer}
                 />
              ) : (
-                <SearchPanel 
-                    query={searchQuery}
-                    setQuery={setSearchQuery}
-                    replace={replaceQuery}
-                    setReplace={setReplaceQuery}
-                    options={searchOptions}
-                    setOptions={setSearchOptions}
-                    results={searchResults}
-                    onSearch={async () => {
-                        if (window.electronAPI && projectRootPath) {
-                            const results = await window.electronAPI.searchInProject({ 
-                                projectPath: projectRootPath, 
-                                query: searchQuery, 
-                                ...searchOptions 
-                            });
-                            setSearchResults(results);
-                        }
-                    }}
-                    onReplaceAll={() => {/* Implementation for replace all */}}
-                    onResultClick={(file, line) => {
-                        const block = blocks.find(b => b.filePath === file);
-                        if (block) handleOpenEditor(block.id, line);
-                    }}
-                    isSearching={isSearching}
-                />
+                <SearchPanel />
              )}
             </div>
           </div>
@@ -3053,18 +3135,23 @@ const App: React.FC = () => {
                 imageScanDirectories={imageScanDirectories}
                 onAddImageScanDirectory={async () => {
                     if (window.electronAPI) {
-                        const path = await window.electronAPI.openDirectory();
-                        if (path) {
-                            setImageScanDirectories(prev => new Map(prev).set(path, {} as any));
-                            const { images: scanned } = await window.electronAPI.scanDirectory(path);
-                            setImages(prev => {
-                                const next = new Map(prev);
-                                scanned.forEach((img: any) => {
-                                    if (!next.has(img.path)) next.set(img.path, { ...img, filePath: img.path, isInProject: false, fileHandle: null });
+                        try {
+                            const path = await window.electronAPI.openDirectory();
+                            if (path) {
+                                setImageScanDirectories(prev => new Map(prev).set(path, null as unknown as FileSystemDirectoryHandle));
+                                const { images: scanned } = await window.electronAPI.scanDirectory(path);
+                                setImages(prev => {
+                                    const next = new Map(prev);
+                                    scanned.forEach((img) => {
+                                        if (!next.has(img.path)) next.set(img.path, { ...img, filePath: img.path, isInProject: false, fileHandle: null });
+                                    });
+                                    return next;
                                 });
-                                return next;
-                            });
-                            setHasUnsavedSettings(true);
+                                setHasUnsavedSettings(true);
+                            }
+                        } catch (err) {
+                            console.error('Failed to scan image directory:', err);
+                            addToast('Failed to scan image directory', 'error');
                         }
                     }
                 }}
@@ -3078,13 +3165,18 @@ const App: React.FC = () => {
                 }}
                 onCopyImagesToProject={async (sourcePaths) => {
                     if (window.electronAPI && projectRootPath) {
-                        for (const src of sourcePaths) {
-                            const fileName = src.split('/').pop() || 'image.png';
-                            const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'images');
-                            const destPath = await window.electronAPI.path.join(destDir, fileName);
-                            await window.electronAPI.copyEntry(src, destPath);
+                        try {
+                            for (const src of sourcePaths) {
+                                const fileName = src.split('/').pop() || 'image.png';
+                                const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'images');
+                                const destPath = await window.electronAPI.path.join(destDir, fileName);
+                                await window.electronAPI.copyEntry(src, destPath);
+                            }
+                            await loadProject(projectRootPath);
+                        } catch (err) {
+                            console.error('Failed to copy images to project:', err);
+                            addToast('Failed to copy images to project', 'error');
                         }
-                        await loadProject(projectRootPath);
                     }
                 }}
                 onUpdateImageMetadata={(path, meta) => {
@@ -3106,18 +3198,23 @@ const App: React.FC = () => {
                 audioScanDirectories={audioScanDirectories}
                 onAddAudioScanDirectory={async () => {
                      if (window.electronAPI) {
-                        const path = await window.electronAPI.openDirectory();
-                        if (path) {
-                            setAudioScanDirectories(prev => new Map(prev).set(path, {} as any));
-                            const { audios: scanned } = await window.electronAPI.scanDirectory(path);
-                            setAudios(prev => {
-                                const next = new Map(prev);
-                                scanned.forEach((aud: any) => {
-                                    if (!next.has(aud.path)) next.set(aud.path, { ...aud, filePath: aud.path, isInProject: false, fileHandle: null });
+                        try {
+                            const path = await window.electronAPI.openDirectory();
+                            if (path) {
+                                setAudioScanDirectories(prev => new Map(prev).set(path, null as unknown as FileSystemDirectoryHandle));
+                                const { audios: scanned } = await window.electronAPI.scanDirectory(path);
+                                setAudios(prev => {
+                                    const next = new Map(prev);
+                                    scanned.forEach((aud) => {
+                                        if (!next.has(aud.path)) next.set(aud.path, { ...aud, filePath: aud.path, isInProject: false, fileHandle: null });
+                                    });
+                                    return next;
                                 });
-                                return next;
-                            });
-                            setHasUnsavedSettings(true);
+                                setHasUnsavedSettings(true);
+                            }
+                        } catch (err) {
+                            console.error('Failed to scan audio directory:', err);
+                            addToast('Failed to scan audio directory', 'error');
                         }
                     }
                 }}
@@ -3131,13 +3228,18 @@ const App: React.FC = () => {
                 }}
                 onCopyAudiosToProject={async (sourcePaths) => {
                      if (window.electronAPI && projectRootPath) {
-                        for (const src of sourcePaths) {
-                            const fileName = src.split('/').pop() || 'audio.ogg';
-                            const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'audio');
-                            const destPath = await window.electronAPI.path.join(destDir, fileName);
-                            await window.electronAPI.copyEntry(src, destPath);
+                        try {
+                            for (const src of sourcePaths) {
+                                const fileName = src.split('/').pop() || 'audio.ogg';
+                                const destDir = await window.electronAPI.path.join(projectRootPath, 'game', 'audio');
+                                const destPath = await window.electronAPI.path.join(destDir, fileName);
+                                await window.electronAPI.copyEntry(src, destPath);
+                            }
+                            await loadProject(projectRootPath);
+                        } catch (err) {
+                            console.error('Failed to copy audio to project:', err);
+                            addToast('Failed to copy audio to project', 'error');
                         }
-                        await loadProject(projectRootPath);
                     }
                 }}
                 onUpdateAudioMetadata={(path, meta) => {
@@ -3183,6 +3285,10 @@ const App: React.FC = () => {
                 // Snippet Props
                 snippetCategoriesState={snippetCategoriesState}
                 onToggleSnippetCategory={handleToggleSnippetCategory}
+                userSnippets={appSettings.userSnippets}
+                onCreateSnippet={() => { setEditingSnippet(null); setUserSnippetModalOpen(true); }}
+                onEditSnippet={(snippet) => { setEditingSnippet(snippet); setUserSnippetModalOpen(true); }}
+                onDeleteSnippet={handleDeleteSnippet}
             />
           </div>
         )}
@@ -3315,14 +3421,14 @@ const App: React.FC = () => {
         isOpen={settingsModalOpen} 
         onClose={() => setSettingsModalOpen(false)}
         settings={{ ...appSettings, ...projectSettings }}
-        onSettingsChange={(key: keyof IdeSettings, value: any) => {
+        onSettingsChange={(key, value) => {
             if (key in appSettings) {
                 updateAppSettings(draft => {
-                    (draft as any)[key] = value;
+                    (draft as Record<string, unknown>)[key] = value;
                 });
             } else {
                 updateProjectSettings(draft => {
-                    (draft as any)[key] = value;
+                    (draft as Record<string, unknown>)[key] = value;
                 });
                 setHasUnsavedSettings(true);
             }
@@ -3337,11 +3443,19 @@ const App: React.FC = () => {
         onOpenSettings={() => { setShortcutsModalOpen(false); setSettingsModalOpen(true); }}
       />
 
+      <UserSnippetModal
+        isOpen={userSnippetModalOpen}
+        onClose={() => setUserSnippetModalOpen(false)}
+        onSave={handleSaveSnippet}
+        existingSnippet={editingSnippet}
+      />
+
       <AboutModal
         isOpen={aboutModalOpen}
         onClose={() => setAboutModalOpen(false)}
       />
     </div>
+    </SearchProvider>
   );
 };
 

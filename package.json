@@ -29,6 +29,7 @@
     "electron-updater": "^6.8.3",
     "immer": "^10.1.1",
     "jszip": "^3.10.1",
+    "marked": "^17.0.5",
     "monaco-editor": "^0.45.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

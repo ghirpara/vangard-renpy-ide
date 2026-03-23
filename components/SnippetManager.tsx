@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import type { UserSnippet } from '../types';
 
 interface Snippet {
   title: string;
@@ -213,9 +214,13 @@ const SNIPPETS: SnippetCategory[] = [
 interface SnippetManagerProps {
     categoriesState?: Record<string, boolean>;
     onToggleCategory?: (name: string, isOpen: boolean) => void;
+    userSnippets?: UserSnippet[];
+    onCreateSnippet?: () => void;
+    onEditSnippet?: (snippet: UserSnippet) => void;
+    onDeleteSnippet?: (snippetId: string) => void;
 }
 
-const SnippetManager: React.FC<SnippetManagerProps> = ({ categoriesState = {}, onToggleCategory }) => {
+const SnippetManager: React.FC<SnippetManagerProps> = ({ categoriesState = {}, onToggleCategory, userSnippets, onCreateSnippet, onEditSnippet, onDeleteSnippet }) => {
     const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
 
     const handleCopy = (code: string, title: string) => {
@@ -226,7 +231,73 @@ const SnippetManager: React.FC<SnippetManagerProps> = ({ categoriesState = {}, o
 
     return (
         <div className="space-y-4">
-            <h3 className="font-semibold">Code Snippets</h3>
+            <div className="flex items-center justify-between">
+                <h3 className="font-semibold">Code Snippets</h3>
+            </div>
+
+            {/* User Snippets Section */}
+            {(userSnippets && userSnippets.length > 0 || onCreateSnippet) && (
+                <details open className="group">
+                    <summary className="font-semibold text-gray-600 dark:text-gray-400 cursor-pointer list-none flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2 transition-transform group-open:rotate-90" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
+                        My Snippets
+                    </summary>
+                    <div className="pl-4 mt-2 space-y-3">
+                        {onCreateSnippet && (
+                            <button
+                                onClick={onCreateSnippet}
+                                className="w-full px-3 py-2 text-sm font-semibold text-indigo-600 dark:text-indigo-400 border border-dashed border-indigo-300 dark:border-indigo-600 rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+                            >
+                                + New Snippet
+                            </button>
+                        )}
+                        {userSnippets?.map(snippet => (
+                            <div key={snippet.id} className="p-3 rounded-md bg-gray-50 dark:bg-gray-700/50">
+                                <div className="flex justify-between items-start">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-semibold">{snippet.title}</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                            <code className="bg-gray-100 dark:bg-gray-600 px-1 rounded">{snippet.prefix}</code>
+                                            {snippet.description && <span className="ml-1">— {snippet.description}</span>}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
+                                        <button
+                                            onClick={() => handleCopy(snippet.code, snippet.title)}
+                                            className={`px-2 py-1 text-xs font-semibold rounded ${copiedSnippet === snippet.title ? 'bg-green-600 text-white' : 'bg-gray-200 dark:bg-gray-600 hover:bg-indigo-100 dark:hover:bg-indigo-800'}`}
+                                        >
+                                            {copiedSnippet === snippet.title ? 'Copied!' : 'Copy'}
+                                        </button>
+                                        {onEditSnippet && (
+                                            <button
+                                                onClick={() => onEditSnippet(snippet)}
+                                                className="px-2 py-1 text-xs font-semibold rounded bg-gray-200 dark:bg-gray-600 hover:bg-indigo-100 dark:hover:bg-indigo-800"
+                                            >
+                                                Edit
+                                            </button>
+                                        )}
+                                        {onDeleteSnippet && (
+                                            <button
+                                                onClick={() => { if (window.confirm(`Delete snippet "${snippet.title}"?`)) onDeleteSnippet(snippet.id); }}
+                                                className="px-2 py-1 text-xs font-semibold rounded bg-gray-200 dark:bg-gray-600 hover:bg-red-100 dark:hover:bg-red-800 text-red-600 dark:text-red-400"
+                                            >
+                                                Delete
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <pre className="bg-gray-800 text-white p-2 rounded text-xs font-mono whitespace-pre-wrap">
+                                    <code>{snippet.code}</code>
+                                </pre>
+                            </div>
+                        ))}
+                        {(!userSnippets || userSnippets.length === 0) && (
+                            <p className="text-xs text-gray-400 italic">No custom snippets yet. Create one to get started.</p>
+                        )}
+                    </div>
+                </details>
+            )}
+
             {SNIPPETS.map(category => {
                 const isOpen = categoriesState[category.name] ?? (category.name !== "ATL & Transforms");
                 return (

@@ -7,7 +7,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import type { ProjectImage, ImageMetadata, RenpyAudio, AudioMetadata } from '../types';
+import type { ProjectImage, ImageMetadata, RenpyAudio, AudioMetadata, FileSystemTreeNode } from '../types';
 // FIX: Removed unused 'useFileSystem' import from incorrect module.
 import { addNodeToFileTree, removeNodeFromFileTree } from './useFileSystemManager';
 import { useToasts } from '../contexts/ToastContext';
@@ -31,7 +31,7 @@ const IDE_SETTINGS_FILE = 'game/project.ide.json';
 interface AssetManagerProps {
     directoryHandle: FileSystemDirectoryHandle | null;
     onPathsUpdated: (updates: Map<string, { newPath: string; type: 'file' | 'folder' }>) => void;
-    onFileTreeUpdate: (updater: (tree: any) => any) => void;
+    onFileTreeUpdate: (updater: (tree: FileSystemTreeNode) => FileSystemTreeNode) => void;
 }
 
 export const useAssetManager = ({ directoryHandle, onPathsUpdated, onFileTreeUpdate }: AssetManagerProps) => {

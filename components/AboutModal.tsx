@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 import packageJson from '../package.json';
 const BUILD_NUMBER = process.env.BUILD_NUMBER || 'dev';
 import logo from '../vangard-renide-512x512.png';
@@ -10,17 +11,20 @@ interface AboutModalProps {
 }
 
 const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
+  const { modalProps, contentRef } = useModalAccessibility({ isOpen, onClose, titleId: 'about-modal-title' });
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]" onClick={onClose}>
-      <div 
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md m-4 flex flex-col border border-gray-200 dark:border-gray-700 overflow-hidden" 
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100]" onClick={onClose} {...modalProps}>
+      <div
+        ref={contentRef}
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md m-4 flex flex-col border border-gray-200 dark:border-gray-700 overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-8 flex flex-col items-center text-center">
             <img src={logo} alt="Vangard Ren'IDE Logo" className="w-32 h-32 mb-4 object-contain drop-shadow-md" />
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">Ren'IDE</h2>
+            <h2 id="about-modal-title" className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">Ren'IDE</h2>
             <p className="text-indigo-600 dark:text-indigo-400 font-mono text-sm mb-6">v{packageJson.version} (build {BUILD_NUMBER})</p>
             
             <p className="text-gray-600 dark:text-gray-300 text-sm mb-4 leading-relaxed">

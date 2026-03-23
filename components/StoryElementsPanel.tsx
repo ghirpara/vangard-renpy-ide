@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import type { Character, Variable, ProjectImage, ImageMetadata, RenpyAudio, AudioMetadata, RenpyScreen, RenpyAnalysisResult } from '../types';
+import type { Character, Variable, ProjectImage, ImageMetadata, RenpyAudio, AudioMetadata, RenpyScreen, RenpyAnalysisResult, UserSnippet } from '../types';
 import VariableManager from './VariableManager';
 import ImageManager from './ImageManager';
 import AudioManager from './AudioManager';
@@ -56,6 +56,10 @@ interface StoryElementsPanelProps {
     // Snippet Props
     snippetCategoriesState: Record<string, boolean>;
     onToggleSnippetCategory: (name: string, isOpen: boolean) => void;
+    userSnippets?: UserSnippet[];
+    onCreateSnippet?: () => void;
+    onEditSnippet?: (snippet: UserSnippet) => void;
+    onDeleteSnippet?: (snippetId: string) => void;
 }
 
 type Tab = 'characters' | 'variables' | 'images' | 'audio' | 'screens' | 'snippets' | 'scenes' | 'menus';
@@ -91,6 +95,7 @@ const StoryElementsPanel: React.FC<StoryElementsPanelProps> = ({
     onHoverHighlightStart, onHoverHighlightEnd,
     scenes, onOpenScene, onCreateScene, onDeleteScene,
     snippetCategoriesState, onToggleSnippetCategory,
+    userSnippets, onCreateSnippet, onEditSnippet, onDeleteSnippet,
 }) => {
     const [activeTab, setActiveTab] = useState<Tab>('characters');
 
@@ -250,9 +255,13 @@ const StoryElementsPanel: React.FC<StoryElementsPanelProps> = ({
                 )}
                 {activeTab === 'snippets' && (
                     <div className="flex-grow overflow-y-auto p-4 overscroll-contain">
-                        <SnippetManager 
+                        <SnippetManager
                             categoriesState={snippetCategoriesState}
                             onToggleCategory={onToggleSnippetCategory}
+                            userSnippets={userSnippets}
+                            onCreateSnippet={onCreateSnippet}
+                            onEditSnippet={onEditSnippet}
+                            onDeleteSnippet={onDeleteSnippet}
                         />
                     </div>
                 )}

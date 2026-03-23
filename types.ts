@@ -227,6 +227,31 @@ export interface RenpyScreen {
 }
 
 /**
+ * A component within a visual screen editor layout.
+ * Used by the Screen Editor (post-1.0 feature).
+ */
+export interface ScreenComponent {
+  id: string;
+  type: 'frame' | 'vbox' | 'hbox' | 'text' | 'textbutton' | 'imagebutton' | 'image' | 'null';
+  name: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  props: Record<string, any>;
+  children: ScreenComponent[];
+}
+
+/**
+ * The top-level model for a screen being edited in the visual Screen Editor.
+ * Used by the Screen Editor (post-1.0 feature).
+ */
+export interface ScreenModel {
+  name: string;
+  width?: number;
+  height?: number;
+  backgroundColor?: string;
+  components: ScreenComponent[];
+}
+
+/**
  * Represents an image asset that can be used in the project.
  * Supports both internal (game/images/) and external scanned images.
  * @interface ProjectImage
@@ -496,7 +521,7 @@ export interface RenpyAnalysisResult {
  */
 export interface EditorTab {
   id: string;
-  type: 'canvas' | 'route-canvas' | 'punchlist' | 'editor' | 'image' | 'audio' | 'character' | 'scene-composer' | 'ai-generator' | 'stats';
+  type: 'canvas' | 'route-canvas' | 'punchlist' | 'editor' | 'image' | 'audio' | 'character' | 'scene-composer' | 'ai-generator' | 'stats' | 'markdown';
   blockId?: string;
   filePath?: string;
   characterTag?: string;
@@ -565,6 +590,20 @@ export interface AppSettings {
   editorFontSize: number;
   snippetCategoriesState?: Record<string, boolean>;
   mouseGestures?: MouseGestureSettings;
+  userSnippets?: UserSnippet[];
+}
+
+/**
+ * A user-defined code snippet.
+ * Stored in AppSettings and available in both the SnippetManager panel and Monaco autocomplete.
+ */
+export interface UserSnippet {
+  id: string;
+  title: string;
+  prefix: string;
+  description: string;
+  code: string;
+  monacoBody?: string;
 }
 
 export type CanvasPanGesture = 'shift-drag' | 'drag' | 'middle-drag';
@@ -787,6 +826,71 @@ export interface FileSystemContextValue {
   tidyUpLayout: (blocksToLayout: Block[], links: Link[]) => Block[];
 }
 
+// --- IPC Data Shapes (returned by Electron main process) ---
+
+/** A file entry returned by the loadProject IPC handler. */
+export interface ProjectFileEntry {
+  path: string;
+  content: string;
+}
+
+/** An image asset entry returned by loadProject or scanDirectory. */
+export interface ScannedImageAsset {
+  path: string;
+  fileName: string;
+  dataUrl: string;
+  lastModified: number;
+  size: number;
+}
+
+/** An audio asset entry returned by loadProject or scanDirectory. */
+export interface ScannedAudioAsset {
+  path: string;
+  fileName: string;
+  dataUrl: string;
+  lastModified: number;
+  size: number;
+}
+
+/** Result of the loadProject IPC call. */
+export interface ProjectLoadResult {
+  rootPath: string;
+  files: ProjectFileEntry[];
+  images: ScannedImageAsset[];
+  audios: ScannedAudioAsset[];
+  settings: ProjectSettings | null;
+  tree: FileSystemTreeNode;
+}
+
+/** Result of the scanDirectory IPC call. */
+export interface ScanDirectoryResult {
+  images: ScannedImageAsset[];
+  audios: ScannedAudioAsset[];
+  error?: string;
+}
+
+/** Serialized sprite for saving scene compositions (paths only, no data URLs). */
+export interface SerializedSprite {
+  id: string;
+  image: { filePath: string };
+  x: number;
+  y: number;
+  zoom: number;
+  zIndex: number;
+  flipH: boolean;
+  flipV: boolean;
+  rotation: number;
+  alpha: number;
+  blur: number;
+  visible?: boolean;
+}
+
+/** Serialized scene composition for persistence. */
+export interface SerializedSceneComposition {
+  background: SerializedSprite | null;
+  sprites: SerializedSprite[];
+}
+
 /**
  * Global Electron API interface available in windows.electronAPI.
  * Provides access to OS-level features in Electron app mode.
@@ -799,14 +903,15 @@ declare global {
           createProject?: () => Promise<string | null>;
           checkRenpyProject?: (path: string) => Promise<{ hasGameFolder: boolean; isRenpyProject: boolean }>;
           cancelProjectLoad?: () => void;
-          loadProject: (path: string) => Promise<any>;
-          refreshProjectTree: (path: string) => Promise<any>;
+          loadProject: (path: string) => Promise<ProjectLoadResult>;
+          refreshProjectTree: (path: string) => Promise<FileSystemTreeNode>;
+          readFile: (path: string) => Promise<string>;
           writeFile: (path: string, content: string, encoding?: string) => Promise<{ success: boolean; error?: string }>;
           createDirectory: (path: string) => Promise<{ success: boolean; error?: string }>;
           removeEntry: (path: string) => Promise<{ success: boolean; error?: string }>;
           moveFile: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>;
           copyEntry: (sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>;
-          scanDirectory: (path: string) => Promise<{ images: any[], audios: any[] }>;
+          scanDirectory: (path: string) => Promise<ScanDirectoryResult>;
           onMenuCommand: (callback: (data: { command: string, type?: 'canvas' | 'route-canvas' | 'punchlist', path?: string }) => void) => () => void;
           onCheckUnsavedChangesBeforeExit: (callback: () => void) => () => void;
           replyUnsavedChangesBeforeExit: (hasUnsaved: boolean) => void;

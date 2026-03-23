@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface ConfigureRenpyModalProps {
   isOpen: boolean;
@@ -9,6 +10,7 @@ interface ConfigureRenpyModalProps {
 const ConfigureRenpyModal: React.FC<ConfigureRenpyModalProps> = ({ isOpen, onClose, onSave }) => {
   const [selectedPath, setSelectedPath] = useState('');
   const [error, setError] = useState('');
+  const { modalProps, contentRef } = useModalAccessibility({ isOpen, onClose, titleId: 'configure-renpy-title' });
 
   if (!isOpen) {
     return null;
@@ -41,13 +43,15 @@ const ConfigureRenpyModal: React.FC<ConfigureRenpyModalProps> = ({ isOpen, onClo
     <div
       className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
       onClick={onClose}
+      {...modalProps}
     >
       <div
+        ref={contentRef}
         className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-lg m-4 flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <header className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-xl font-bold">Configure Ren'Py Launcher</h2>
+          <h2 id="configure-renpy-title" className="text-xl font-bold">Configure Ren'Py Launcher</h2>
         </header>
         <main className="p-6 space-y-4">
           <p className="text-gray-600 dark:text-gray-300">

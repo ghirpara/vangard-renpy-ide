@@ -44,7 +44,7 @@ async function loadWindowState() {
             return state;
         }
     } catch {
-        console.log('No saved window state found, using defaults.');
+        // First launch or corrupted state — use defaults
     }
     return null;
 }
@@ -67,7 +67,6 @@ async function loadAppSettings() {
         const data = await fs.readFile(appSettingsPath, 'utf-8');
         return JSON.parse(data);
     } catch {
-        console.log('No saved app settings found, using defaults.');
         return null;
     }
 }
@@ -88,14 +87,12 @@ const apiKeysPath = path.join(app.getPath('userData'), 'api-keys.enc');
 async function loadApiKeys() {
     try {
         if (!safeStorage.isEncryptionAvailable()) {
-            console.warn('Safe storage encryption not available');
             return {};
         }
         const encryptedData = await fs.readFile(apiKeysPath);
         const decryptedData = safeStorage.decryptString(encryptedData);
         return JSON.parse(decryptedData);
     } catch {
-        console.log('No saved API keys found or failed to decrypt, using empty object.');
         return {};
     }
 }
@@ -481,7 +478,7 @@ async function updateApplicationMenu() {
                 label: 'Check for Updates',
                 click: () => {
                     if (app.isPackaged) {
-                        autoUpdater.checkForUpdates().catch(() => {});
+                        autoUpdater.checkForUpdates().catch(err => console.error('Auto-update check failed:', err));
                     }
                 }
             },
@@ -633,28 +630,38 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('dialog:openDirectory', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      properties: ['openDirectory']
-    });
-    if (canceled) {
+    try {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        properties: ['openDirectory']
+      });
+      if (canceled) {
+        return null;
+      } else {
+        return filePaths[0];
+      }
+    } catch (error) {
+      console.error('Failed to open directory dialog:', error);
       return null;
-    } else {
-      return filePaths[0];
     }
   });
 
    ipcMain.handle('dialog:selectRenpy', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-        title: 'Select Ren\'Py Executable',
-        properties: ['openFile'],
-        filters: [
-            { name: 'Ren\'Py Launcher', extensions: process.platform === 'win32' ? ['exe'] : ['sh'] },
-        ]
-    });
-    if (canceled) {
-        return null;
-    } else {
-        return filePaths[0];
+    try {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+          title: 'Select Ren\'Py Executable',
+          properties: ['openFile'],
+          filters: [
+              { name: 'Ren\'Py Launcher', extensions: process.platform === 'win32' ? ['exe'] : ['sh'] },
+          ]
+      });
+      if (canceled) {
+          return null;
+      } else {
+          return filePaths[0];
+      }
+    } catch (error) {
+      console.error('Failed to open Ren\'Py selection dialog:', error);
+      return null;
     }
   });
 
@@ -689,9 +696,14 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('dialog:showSaveDialog', async (event, options) => {
-    const { canceled, filePath } = await dialog.showSaveDialog(options);
-    if (canceled) return null;
-    return filePath;
+    try {
+      const { canceled, filePath } = await dialog.showSaveDialog(options);
+      if (canceled) return null;
+      return filePath;
+    } catch (error) {
+      console.error('Failed to open save dialog:', error);
+      return null;
+    }
   });
 
   ipcMain.handle('dialog:checkRenpyProject', async (event, rootPath) => {
@@ -768,10 +780,20 @@ app.whenReady().then(() => {
           return await scanDirectoryForAssets(dirPath);
       } catch (error) {
           console.error("Scan directory failed:", error);
-          return { images: [], audios: [] };
+          return { images: [], audios: [], error: error.message };
       }
   });
   
+  ipcMain.handle('fs:readFile', async (event, filePath) => {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return content;
+    } catch (error) {
+      console.error("Read file failed:", error);
+      throw error;
+    }
+  });
+
   ipcMain.handle('path:join', (event, ...args) => {
     return path.join(...args);
   });
@@ -808,7 +830,6 @@ app.whenReady().then(() => {
 
   ipcMain.on('game:run', (event, renpyPath, projectPath) => {
     if (gameProcess) {
-      console.log('Game is already running.');
       return;
     }
 
@@ -817,8 +838,7 @@ app.whenReady().then(() => {
       event.sender.send('game-started');
       setGameRunningMenuState(true);
 
-      gameProcess.on('close', (code) => {
-        console.log(`Game process exited with code ${code}`);
+      gameProcess.on('close', () => {
         gameProcess = null;
         event.sender.send('game-stopped');
         setGameRunningMenuState(false);
@@ -841,7 +861,11 @@ app.whenReady().then(() => {
 
   ipcMain.on('game:stop', (event) => {
     if (gameProcess) {
-      gameProcess.kill();
+      try {
+        gameProcess.kill();
+      } catch (error) {
+        console.error('Failed to kill game process:', error);
+      }
       gameProcess = null;
       event.sender.send('game-stopped');
       setGameRunningMenuState(false);
@@ -911,11 +935,20 @@ app.whenReady().then(() => {
   }
 
   ipcMain.on('install-update', () => {
-    autoUpdater.quitAndInstall();
+    try {
+      autoUpdater.quitAndInstall();
+    } catch (error) {
+      console.error('Failed to install update:', error);
+      dialog.showErrorBox('Update Failed', `Could not install update: ${error.message}`);
+    }
   });
 
-  ipcMain.handle('shell:openExternal', (_event, url) => {
-    shell.openExternal(url);
+  ipcMain.handle('shell:openExternal', async (_event, url) => {
+    try {
+      await shell.openExternal(url);
+    } catch (error) {
+      console.error('Failed to open external URL:', error);
+    }
   });
 
   app.on('activate', () => {

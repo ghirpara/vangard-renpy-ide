@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 export type BlockType = 'story' | 'screen' | 'config';
 
@@ -15,6 +16,7 @@ const CreateBlockModal: React.FC<CreateBlockModalProps> = ({ isOpen, onClose, on
   const [type, setType] = useState<BlockType>('story');
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const { modalProps, contentRef } = useModalAccessibility({ isOpen, onClose, titleId: 'create-block-title' });
 
   useEffect(() => {
     if (isOpen) {
@@ -43,19 +45,19 @@ const CreateBlockModal: React.FC<CreateBlockModalProps> = ({ isOpen, onClose, on
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
       if (e.key === 'Enter') handleConfirm();
-      if (e.key === 'Escape') onClose();
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-      <div 
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" {...modalProps}>
+      <div
+        ref={contentRef}
         className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md m-4 flex flex-col border border-gray-200 dark:border-gray-700"
         onClick={e => e.stopPropagation()}
       >
         <header className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Add New Block</h2>
+          <h2 id="create-block-title" className="text-xl font-bold text-gray-900 dark:text-gray-100">Add New Block</h2>
         </header>
         
         <main className="p-6 space-y-4">

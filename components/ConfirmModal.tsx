@@ -1,4 +1,5 @@
 import React from 'react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface ConfirmModalProps {
   title: string;
@@ -27,19 +28,21 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
   confirmClassName = 'bg-red-600 hover:bg-red-700',
   secondaryAction
 }) => {
+  const { modalProps, contentRef } = useModalAccessibility({ isOpen: true, onClose, titleId: 'confirm-modal-title' });
+
   return (
     <div
       className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
-      onClick={onClose} // Close on backdrop click
-      aria-modal="true"
-      role="dialog"
+      onClick={onClose}
+      {...modalProps}
     >
       <div
+        ref={contentRef}
         className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md m-4 flex flex-col"
-        onClick={e => e.stopPropagation()} // Prevent closing when clicking inside modal
+        onClick={e => e.stopPropagation()}
       >
         <header className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-xl font-bold">{title}</h2>
+          <h2 id="confirm-modal-title" className="text-xl font-bold">{title}</h2>
         </header>
         <main className="p-6">
           <p className="text-gray-600 dark:text-gray-300">

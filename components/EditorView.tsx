@@ -8,8 +8,10 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import Editor, { OnMount, BeforeMount } from '@monaco-editor/react';
-import type { Block, RenpyAnalysisResult, ToastMessage } from '../types';
+import type { Block, RenpyAnalysisResult, ToastMessage, UserSnippet } from '../types';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import { detectContext, getRenpyCompletions } from '../lib/renpyCompletionProvider';
+import type { RenpyCompletionData } from '../lib/renpyCompletionProvider';
 
 interface EditorViewProps {
   block: Block;
@@ -20,6 +22,7 @@ interface EditorViewProps {
   onSave: (blockId: string, newContent: string) => void;
   onTriggerSave?: (blockId: string) => void;
   onDirtyChange: (blockId: string, isDirty: boolean) => void;
+  onContentChange?: (blockId: string, content: string) => void;
   editorTheme: 'light' | 'dark';
   editorFontFamily: string;
   editorFontSize: number;
@@ -33,6 +36,7 @@ interface EditorViewProps {
   draftingMode: boolean;
   existingImageTags: Set<string>;
   existingAudioPaths: Set<string>;
+  userSnippets?: UserSnippet[];
 }
 
 const LABEL_REGEX = /^\s*label\s+([a-zA-Z0-9_]+):/;
@@ -76,6 +80,7 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
     onSave, 
     onTriggerSave,
     onDirtyChange,
+    onContentChange,
     editorTheme,
     editorFontFamily,
     editorFontSize,
@@ -109,6 +114,9 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
   const analysisResultRef = useRef(analysisResult);
   const onEditorUnmountRef = useRef(onEditorUnmount);
   const onCursorPositionChangeRef = useRef(onCursorPositionChange);
+  const onContentChangeRef = useRef(onContentChange);
+  const contentChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userSnippetsRef = useRef(props.userSnippets);
 
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange;
@@ -118,7 +126,9 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
     analysisResultRef.current = analysisResult;
     onEditorUnmountRef.current = onEditorUnmount;
     onCursorPositionChangeRef.current = onCursorPositionChange;
-  }, [onDirtyChange, onTriggerSave, block, onSwitchFocusBlock, analysisResult, onEditorUnmount, onCursorPositionChange]);
+    onContentChangeRef.current = onContentChange;
+    userSnippetsRef.current = props.userSnippets;
+  }, [onDirtyChange, onTriggerSave, block, onSwitchFocusBlock, analysisResult, onEditorUnmount, onCursorPositionChange, onContentChange, props.userSnippets]);
 
   // This effect resets the internal dirty flag when the block content is updated
   // from an external source (like a save operation). This ensures the component can
@@ -140,6 +150,8 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
         // and managing the dirty state transition. This avoids race conditions.
         onEditorUnmountRef.current(blockRef.current.id);
         onCursorPositionChangeRef.current?.(null);
+        // Clear any pending debounced content sync
+        if (contentChangeTimerRef.current) clearTimeout(contentChangeTimerRef.current);
     };
   }, []); // <-- Empty array ensures this runs ONLY on unmount
   
@@ -222,7 +234,33 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
               { token: 'operator', foreground: '0184BC' }, 
               { token: 'punctuation', foreground: '383A42' }
           ], 
-          colors: { 'editor.background': '#FAFAFA' } 
+          colors: { 'editor.background': '#FAFAFA' }
+      });
+
+      // Register context-aware completion provider
+      monacoInstance.languages.registerCompletionItemProvider('renpy', {
+        triggerCharacters: [' ', '$'],
+        provideCompletionItems: (model, position) => {
+          const lineContent = model.getLineContent(position.lineNumber);
+          const wordInfo = model.getWordUntilPosition(position);
+          const range = {
+            startLineNumber: position.lineNumber,
+            startColumn: wordInfo.startColumn,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column,
+          };
+          const context = detectContext(lineContent, position.column);
+          const analysis = analysisResultRef.current;
+          const data: RenpyCompletionData = {
+            labels: analysis.labels,
+            characters: analysis.characters,
+            variables: analysis.variables,
+            screens: analysis.screens,
+            definedImages: analysis.definedImages,
+            userSnippets: userSnippetsRef.current,
+          };
+          return { suggestions: getRenpyCompletions(context, data, range) };
+        },
       });
     }
   };
@@ -311,7 +349,7 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
 
   const handleEditorDidMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
-    monacoRef.current = monacoInstance as any; // Type casting to satisfy TS if needed
+    monacoRef.current = monacoInstance;
 
     // Ensure language is set correctly
     const model = editor.getModel();
@@ -362,14 +400,24 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
         const currentContent = editor.getValue();
         const savedContent = blockRef.current.content;
         const isDirty = currentContent !== savedContent;
-        
+
         if (isDirty !== isDirtyRef.current) {
             isDirtyRef.current = isDirty;
             onDirtyChangeRef.current(blockRef.current.id, isDirty);
         }
-        
-        const markers = performValidation(currentContent, monacoInstance as any);
+
+        const markers = performValidation(currentContent, monacoInstance);
         monacoInstance.editor.setModelMarkers(editor.getModel()!, 'renpy', markers);
+
+        // Debounced sync of editor content to React state so that
+        // the analysis engine (links, labels, routes) stays up-to-date
+        // during active editing, not just on save.
+        if (onContentChangeRef.current) {
+            if (contentChangeTimerRef.current) clearTimeout(contentChangeTimerRef.current);
+            contentChangeTimerRef.current = setTimeout(() => {
+                onContentChangeRef.current?.(blockRef.current.id, editor.getValue());
+            }, 800);
+        }
     });
     
     editor.onDidChangeCursorPosition(() => {
@@ -442,7 +490,7 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
       }
     });
 
-    const markers = performValidation(editor.getValue(), monacoInstance as any);
+    const markers = performValidation(editor.getValue(), monacoInstance);
     monacoInstance.editor.setModelMarkers(editor.getModel()!, 'renpy', markers);
   };
   

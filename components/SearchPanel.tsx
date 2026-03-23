@@ -9,21 +9,7 @@
 
 
 import React, { useState, useMemo } from 'react';
-import type { SearchResult } from '../types';
-
-interface SearchPanelProps {
-  query: string;
-  setQuery: (q: string) => void;
-  replace: string;
-  setReplace: (r: string) => void;
-  options: { isCaseSensitive: boolean; isWholeWord: boolean; isRegex: boolean; };
-  setOptions: (options: { isCaseSensitive: boolean; isWholeWord: boolean; isRegex: boolean; }) => void;
-  results: SearchResult[];
-  onSearch: () => void;
-  onReplaceAll: () => void;
-  onResultClick: (filePath: string, lineNumber: number) => void;
-  isSearching: boolean;
-}
+import { useSearch } from '../contexts/SearchContext';
 
 const SearchOptionButton: React.FC<{ title: string; isActive: boolean; onClick: () => void; children: React.ReactNode }> = ({ title, isActive, onClick, children }) => (
     <button
@@ -35,7 +21,16 @@ const SearchOptionButton: React.FC<{ title: string; isActive: boolean; onClick: 
     </button>
 );
 
-const SearchPanel: React.FC<SearchPanelProps> = ({ query, setQuery, replace, setReplace, options, setOptions, results, onSearch, onReplaceAll, onResultClick, isSearching }) => {
+const SearchPanel: React.FC = () => {
+    const search = useSearch();
+    const { searchQuery: query, setSearchQuery: setQuery,
+        replaceQuery: replace, setReplaceQuery: setReplace,
+        searchOptions: options, setSearchOptions: setOptions,
+        searchResults: results,
+        executeSearch: onSearch, executeReplaceAll: onReplaceAll,
+        handleResultClick: onResultClick,
+        isSearching,
+    } = search;
     const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
     const [showReplace, setShowReplace] = useState(false);
 

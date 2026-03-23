@@ -7,13 +7,14 @@
  */
 
 import React from 'react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 import type { Theme, IdeSettings, MouseGestureSettings, CanvasPanGesture } from '../types';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: IdeSettings;
-  onSettingsChange: (key: keyof IdeSettings, value: any) => void;
+  onSettingsChange: (key: keyof IdeSettings, value: IdeSettings[keyof IdeSettings]) => void;
   availableModels: string[];
 }
 
@@ -39,13 +40,15 @@ const DEFAULT_MOUSE_GESTURES: MouseGestureSettings = {
 };
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, settings, onSettingsChange, availableModels }) => {
+  const { modalProps, contentRef } = useModalAccessibility({ isOpen, onClose, titleId: 'settings-modal-title' });
+
   if (!isOpen) {
     return null;
   }
 
   const mouseGestures: MouseGestureSettings = settings.mouseGestures ?? DEFAULT_MOUSE_GESTURES;
 
-  const handleMouseGestureChange = (key: keyof MouseGestureSettings, value: any) => {
+  const handleMouseGestureChange = (key: keyof MouseGestureSettings, value: MouseGestureSettings[keyof MouseGestureSettings]) => {
     onSettingsChange('mouseGestures', { ...mouseGestures, [key]: value });
   };
 
@@ -62,15 +65,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, settings
     <div
       className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
       onClick={onClose}
-      aria-modal="true"
-      role="dialog"
+      {...modalProps}
     >
       <div
+        ref={contentRef}
         className="bg-secondary rounded-lg shadow-2xl w-full max-w-lg m-4 flex flex-col max-h-[90vh] overflow-hidden border border-primary text-primary"
         onClick={e => e.stopPropagation()}
       >
         <header className="p-4 border-b border-primary">
-          <h2 className="text-xl font-bold">Settings</h2>
+          <h2 id="settings-modal-title" className="text-xl font-bold">Settings</h2>
         </header>
         <main className="p-6 space-y-6 overflow-y-auto">
             <div>

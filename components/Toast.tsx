@@ -60,7 +60,7 @@ const Toast: React.FC<ToastProps> = ({ toast, onDismiss }) => {
       <div className={`w-80 max-w-sm rounded-lg shadow-lg border-l-4 p-4 flex items-start space-x-3 ${typeClasses[toast.type]} ${isExiting ? 'toast-exit' : 'toast-enter'}`}>
         <div className="flex-shrink-0"><Icon /></div>
         <div className="flex-grow text-sm">{toast.message}</div>
-        <button onClick={handleDismiss} className="flex-shrink-0 -mr-1 -mt-1 p-1 rounded-full hover:bg-black/10">
+        <button onClick={handleDismiss} aria-label="Dismiss notification" className="flex-shrink-0 -mr-1 -mt-1 p-1 rounded-full hover:bg-black/10">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
         </button>
       </div>

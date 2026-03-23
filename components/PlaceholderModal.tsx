@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useModalAccessibility } from '../hooks/useModalAccessibility';
 
 interface PlaceholderModalProps {
   isOpen: boolean;
@@ -9,6 +10,7 @@ interface PlaceholderModalProps {
 }
 
 const PlaceholderModal: React.FC<PlaceholderModalProps> = ({ isOpen, onClose, onGenerate, defaultPath }) => {
+  const { modalProps, contentRef } = useModalAccessibility({ isOpen, onClose, titleId: 'placeholder-modal-title' });
   const [fileName, setFileName] = useState('placeholder.png');
   const [width, setWidth] = useState(1920);
   const [height, setHeight] = useState(1080);
@@ -88,13 +90,14 @@ const PlaceholderModal: React.FC<PlaceholderModalProps> = ({ isOpen, onClose, on
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-      <div 
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" onClick={onClose} {...modalProps}>
+      <div
+        ref={contentRef}
         className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-4xl m-4 flex flex-col border border-gray-200 dark:border-gray-700 max-h-[90vh]"
         onClick={e => e.stopPropagation()}
       >
         <header className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Create Placeholder Asset</h2>
+          <h2 id="placeholder-modal-title" className="text-xl font-bold text-gray-900 dark:text-gray-100">Create Placeholder Asset</h2>
         </header>
         
         <main className="p-6 flex flex-col md:flex-row gap-6 overflow-hidden">

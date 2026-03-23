@@ -50,6 +50,13 @@ export default defineConfig(({ mode }) => {
        */
       'process.env.BUILD_NUMBER': JSON.stringify(env.BUILD_NUMBER || 'dev'),
     },
+    // Strip console.log and console.warn from production builds.
+    // console.error is kept — those indicate real problems.
+    ...(!isDevelopment && {
+      esbuild: {
+        pure: ['console.log', 'console.warn'],
+      },
+    }),
     // Build optimization settings
     build: {
       // Always generate sourcemaps for debugging (even in production)

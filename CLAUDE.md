@@ -24,11 +24,25 @@ npm run release:patch    # Increment version + build
 
 **Testing** (Vitest):
 ```bash
-npx vitest run          # Run all tests once
-npx vitest              # Run in watch mode
-npx vitest run --coverage  # With coverage report
+npm test                        # Run all tests once
+npm run test:watch               # Run in watch mode
+npm run test:coverage            # With coverage report
+npx vitest run path/to/file.test.ts  # Run a single test file
 ```
 Coverage is configured for `components/`, `hooks/`, `contexts/`, and `App.tsx` using jsdom environment.
+
+Test infrastructure:
+- **Setup**: `test/setup.ts` — imports `@testing-library/jest-dom` matchers
+- **Electron mock**: `test/mocks/electronAPI.ts` — mock `window.electronAPI` for renderer tests
+- **Sample data**: `test/mocks/sampleData.ts` — reusable test fixtures (blocks, characters, etc.)
+- Component tests use `@testing-library/react` with `@testing-library/user-event`
+
+**Linting** (ESLint):
+```bash
+npm run lint             # Check for lint errors
+npm run lint:fix         # Auto-fix lint errors
+```
+Key rules: `react-hooks/rules-of-hooks` (error), `react-hooks/exhaustive-deps` (warn), `@typescript-eslint/no-explicit-any` (warn). Unused vars prefixed with `_` are allowed.
 
 ## Architecture
 
@@ -40,19 +54,22 @@ Coverage is configured for `components/`, `hooks/`, `contexts/`, and `App.tsx` u
 
 ### Core Application State (App.tsx)
 
-`App.tsx` (~3K lines) is the central state hub. It manages all top-level state (blocks, groups, links, characters, variables, images, audio, screens, scenes, settings) using `useImmer` for immutable draft-based updates. State flows down via props; update callbacks are passed through the component hierarchy.
+`App.tsx` (~3.5K lines) is the central state hub. It manages all top-level state (blocks, groups, links, characters, variables, images, audio, screens, scenes, settings) using `useImmer` for immutable draft-based updates. State flows down via props; update callbacks are passed through the component hierarchy. Some state has been extracted into context providers (see Context Providers below).
 
 ### Key Data Model (types.ts)
 
-`types.ts` (~850 lines) is the single source of truth for TypeScript types. Key types:
+`types.ts` (~930 lines) is the single source of truth for TypeScript types. Key types:
 
 - **Block**: Represents a `.rpy` file with position, size, content, and filePath
 - **BlockGroup**: Groups blocks visually on the canvas
 - **Link**: Connection between blocks (from `jump`/`call` statements)
-- **EditorTab**: Open tab in the editor pane (id, title, filePath, content, isDirty)
+- **EditorTab**: Open tab in the editor pane; `type` union includes `canvas`, `route-canvas`, `punchlist`, `editor`, `image`, `audio`, `character`, `scene-composer`, `ai-generator`, `stats`, `markdown`
 - **ProjectSettings**: Persisted per-project IDE state including split pane layout, open tabs, canvas transforms
 - **AppSettings**: Global app preferences (theme, Ren'Py path, etc.)
 - **Character, Variable, ImageAsset, AudioAsset, Screen, Scene**: Story element types
+- **UserSnippet**: User-defined code snippet (id, title, prefix, description, code, optional monacoBody for placeholder support)
+- **ProjectLoadResult, ScanDirectoryResult**: Typed IPC return shapes (replacing prior `any` usage)
+- **SerializedSprite, SerializedSceneComposition**: JSON-safe versions of scene composer types
 
 ### Ren'Py Analysis Engine (hooks/useRenpyAnalysis.ts)
 
@@ -84,9 +101,10 @@ Managed by `hooks/useFileSystemManager.ts` and `contexts/FileSystemContext.ts`.
 
 ### Context Providers
 
-- **AssetContext** (`hooks/useAssetManager.ts`): Image/audio scanning, copy-to-project pipeline, metadata; persists scan directory paths in IDE settings
-- **FileSystemContext** (`hooks/useFileSystemManager.ts`, ~13K lines): Directory/file handle state, clipboard (cut/copy/paste), tree node CRUD and drag-drop
-- **ToastContext**: User notification system
+- **AssetContext** (`contexts/AssetContext.ts` + `hooks/useAssetManager.ts`): Image/audio scanning, copy-to-project pipeline, metadata; persists scan directory paths in IDE settings
+- **FileSystemContext** (`contexts/FileSystemContext.ts` + `hooks/useFileSystemManager.ts`, ~13K lines): Directory/file handle state, clipboard (cut/copy/paste), tree node CRUD and drag-drop
+- **SearchContext** (`contexts/SearchContext.tsx`): Project-wide search/replace state and execution. SearchPanel consumes this context directly (no prop drilling). Extracted from App.tsx.
+- **ToastContext** (`contexts/ToastContext.tsx`): User notification system
 
 ### IPC Channel Conventions
 
@@ -94,7 +112,7 @@ All `preload.js` channels follow a `namespace:action` naming pattern:
 
 | Prefix | Domain |
 |--------|--------|
-| `fs:` | File I/O (`writeFile`, `createDirectory`, `removeEntry`, `moveFile`, `copyEntry`, `scanDirectory`) |
+| `fs:` | File I/O (`readFile`, `writeFile`, `createDirectory`, `removeEntry`, `moveFile`, `copyEntry`, `scanDirectory`) |
 | `project:` | Project operations (`load`, `refresh-tree`, `search`) |
 | `dialog:` | OS dialogs (`openDirectory`, `createProject`, `selectRenpy`, `showSaveDialog`) |
 | `game:` / `renpy:` | Game process (`run`, `stop`, `check-path`) |
@@ -108,10 +126,11 @@ API keys are stored encrypted via Electron's `safeStorage` at `userData/api-keys
 
 - **State updates**: Always use `useImmer` draft functions, never mutate state directly
 - **UI rendering**: Functional components with hooks only, no class components
-- **Modals/overlays**: Rendered via `createPortal()`
+- **Modals/overlays**: Rendered via `createPortal()`; all modals use `useModalAccessibility` hook for focus trap, Escape key close, and focus restore
 - **Styling**: Tailwind CSS utility classes; dark mode via `class` strategy
 - **Path alias**: `@/*` maps to project root in imports (tsconfig)
 - **Block = file**: Each `.rpy` file maps 1:1 to a Block on the canvas; the first label becomes the block title
+- **Accessibility**: Icon-only buttons must have `aria-label`; modals must have `role="dialog"`, `aria-modal`, and `aria-labelledby`
 
 ## Key Hooks
 
@@ -119,6 +138,7 @@ API keys are stored encrypted via Electron's `safeStorage` at `userData/api-keys
 - **useRenpyAnalysis**: Returns `RenpyAnalysisResult` with links, characters, variables, screens, dialogue, and route graphs. Call `performRenpyAnalysis()` after any file change.
 - **useFileSystemManager**: File system abstraction with clipboard state (`Set<string>` of paths for cut/copy).
 - **useAssetManager**: Manages `ProjectImage` and `RenpyAudio` Maps with metadata; handles scanning external directories and copying assets into the project.
+- **useModalAccessibility**: Reusable hook for dialog accessibility — focus trap (Tab/Shift+Tab cycling), Escape key close, auto-focus first element, focus restore on unmount. Used by all modals.
 
 ## Keyboard Shortcuts
 
@@ -127,6 +147,36 @@ API keys are stored encrypted via Electron's `safeStorage` at `userData/api-keys
 - `Ctrl+S` — Save
 - `Shift+drag` — Pan canvas
 - `Scroll` — Zoom canvas
+
+## IntelliSense / Autocomplete
+
+`lib/renpyCompletionProvider.ts` provides context-aware autocomplete for the Monaco editor:
+- **`detectContext(lineContent, column)`**: Determines completion context from cursor position (jump, call, call-screen, show, hide, scene, variable, character, general)
+- **`getRenpyCompletions(context, data, range)`**: Returns Monaco `CompletionItem[]` with appropriate kinds, sort ordering, and snippet placeholders (`$1/$2/$0`)
+- Registered once in `EditorView.tsx` via `monacoInstance.languages.registerCompletionItemProvider('renpy', ...)`
+- Uses `analysisResultRef` (a React ref) so the closure always reads the latest analysis data without re-registration
+- Includes 28 built-in keyword snippets plus user-defined snippets from `AppSettings.userSnippets`
+
+## User Code Snippets
+
+Users can create custom code snippets (persisted in `AppSettings.userSnippets`):
+- **`components/UserSnippetModal.tsx`**: Create/edit modal with title, prefix, description, code, and optional Monaco placeholder support
+- **`components/SnippetManager.tsx`**: Displays "My Snippets" section (create/edit/delete/copy) above built-in Ren'Py snippet categories
+- User snippets are integrated with IntelliSense — typing the prefix triggers the snippet in the editor
+- CRUD operations wired through `App.tsx` → `updateAppSettings`
+
+## Markdown Preview
+
+`components/MarkdownPreviewView.tsx` provides dual-mode `.md` file viewing:
+- **Preview mode** (default): Renders GitHub-flavored Markdown via `marked` library with custom `.markdown-body` CSS styles in `index.css`
+- **Edit mode**: Monaco editor with `language="markdown"`, Ctrl+S to save
+- Toggle button in the toolbar switches between modes
+- File content loaded/saved via `fs:readFile` and `fs:writeFile` IPC channels
+- Opened by double-clicking `.md` files in the file explorer (`handlePathDoubleClick` → `handleOpenMarkdownTab`)
+
+## AI Story Generator
+
+The app integrates AI APIs (Google Gemini via `@google/genai`, with optional OpenAI and Anthropic support via dynamic imports) for generating story content. API keys are encrypted at rest using Electron's `safeStorage`. The generator UI lives in `components/AIGenerator.tsx`.
 
 ## CI/CD
 
