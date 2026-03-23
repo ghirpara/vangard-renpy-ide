@@ -38,6 +38,8 @@ interface EditorViewProps {
 const LABEL_REGEX = /^\s*label\s+([a-zA-Z0-9_]+):/;
 const JUMP_REGEX = /\b(jump|call)\s+([a-zA-Z0-9_]+)/g;
 const AUDIO_USAGE_REGEX = /^\s*(?:play|queue)\s+\w+\s+(.+)/;
+// Ren'Py keywords that follow `jump`/`call` but are not label targets.
+const JUMP_KEYWORD_TARGETS = new Set(['expression', 'screen']);
 
 const Breadcrumbs: React.FC<{ filePath?: string, context?: string }> = ({ filePath, context }) => {
     if (!filePath) return null;
@@ -227,69 +229,29 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
 
   const performValidation = (code: string, monacoInstance: typeof monaco): monaco.editor.IMarkerData[] => {
     const markers: monaco.editor.IMarkerData[] = [];
+
+    // Skip jump validation until the analysis engine has run at least once.
+    // Without analysis data every cross-file jump would appear invalid on first load.
+    const analysisLabels = analysisResultRef.current.labels;
+    if (Object.keys(analysisLabels).length === 0) return markers;
+
     const lines = code.split('\n');
     const localLabels = new Set<string>();
-
     lines.forEach(line => {
         const match = line.match(LABEL_REGEX);
         if (match) localLabels.add(match[1]);
     });
 
-    let previousIndent = -1;
-    let expectIndentedBlock = false;
-
     lines.forEach((line, index) => {
       const lineNumber = index + 1;
       const trimmedLine = line.trim();
-      
       if (trimmedLine === '' || trimmedLine.startsWith('#')) return;
 
-      const currentIndent = line.length - line.trimStart().length;
-
-      if (expectIndentedBlock) {
-        if (currentIndent <= previousIndent) {
-          markers.push({
-            startLineNumber: lineNumber,
-            startColumn: 1,
-            endLineNumber: lineNumber,
-            endColumn: line.length + 1,
-            message: 'Indentation error: Expected an indented block.',
-            severity: monacoInstance.MarkerSeverity.Error,
-          });
-        }
-        expectIndentedBlock = false;
-      }
-      
-      if (currentIndent % 4 !== 0) {
-        markers.push({
-          startLineNumber: lineNumber,
-          startColumn: 1,
-          endLineNumber: lineNumber,
-          endColumn: currentIndent + 1,
-          message: 'Indentation error: Use 4 spaces per indentation level.',
-          severity: monacoInstance.MarkerSeverity.Warning,
-        });
-      }
-
-      const colonKeywords = ['label', 'if', 'elif', 'menu', 'python', 'while', 'for', 'else', 'init'];
-      const firstWord = trimmedLine.split(/[\s:]/)[0];
-      if (colonKeywords.includes(firstWord) && !trimmedLine.endsWith(':')) {
-        markers.push({
-          startLineNumber: lineNumber,
-          startColumn: line.indexOf(trimmedLine) + trimmedLine.length + 1,
-          endLineNumber: lineNumber,
-          endColumn: line.indexOf(trimmedLine) + trimmedLine.length + 2,
-          message: `Syntax Error: Missing ':'`,
-          severity: monacoInstance.MarkerSeverity.Error,
-        });
-      }
-      
-      if (trimmedLine.endsWith(':')) {
-        expectIndentedBlock = true;
-        previousIndent = currentIndent;
-      }
-
-      let sanitizedLine = line.replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, m => ' '.repeat(m.length)).replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, m => ' '.repeat(m.length));
+      // Strip string literals and inline comments before scanning for jumps so
+      // we don't flag label names that appear inside quoted text or comments.
+      let sanitizedLine = line
+          .replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, m => ' '.repeat(m.length))
+          .replace(/'[^'\\]*(?:\\.[^'\\]*)*'/g, m => ' '.repeat(m.length));
       const commentIndex = sanitizedLine.indexOf('#');
       if (commentIndex !== -1) sanitizedLine = sanitizedLine.substring(0, commentIndex);
 
@@ -297,10 +259,10 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
       let match;
       while ((match = lineJumpRegex.exec(sanitizedLine)) !== null) {
           const target = match[2];
-          if (target === 'expression' || target === 'screen') continue;
+          if (JUMP_KEYWORD_TARGETS.has(target)) continue;
 
           const isLocal = localLabels.has(target);
-          const globalLabelDef = analysisResultRef.current.labels[target];
+          const globalLabelDef = analysisLabels[target];
           const isExternal = globalLabelDef && globalLabelDef.blockId !== blockRef.current.id;
 
           if (!isLocal && !isExternal) {
@@ -485,10 +447,39 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
   };
   
   useEffect(() => {
-      if (isMounted && editorRef.current && monacoRef.current) {
-          const markers = performValidation(editorRef.current.getValue(), monacoRef.current as any);
-          monacoRef.current.editor.setModelMarkers(editorRef.current.getModel()!, 'renpy', markers);
-      }
+      if (!isMounted || !editorRef.current || !monacoRef.current) return;
+
+      const monacoInstance = monacoRef.current;
+      const model = editorRef.current.getModel();
+      if (!model) return;
+
+      // When the file has unsaved edits, the analysis result reflects the saved
+      // version and line numbers may be stale. In that case, the real-time markers
+      // from performValidation (fired on every keystroke) are more accurate, so
+      // don't overwrite them here.
+      const currentContent = editorRef.current.getValue();
+      if (currentContent !== blockRef.current.content) return;
+
+      // Use the analysis engine's pre-computed jump locations. These come from the
+      // same parser that drives the canvas links, so column positions are accurate
+      // and all edge cases (expression jumps, `call screen`, string literals, etc.)
+      // are already handled.
+      const blockJumps = analysisResult.jumps[block.id] ?? [];
+      const invalidTargets = new Set(analysisResult.invalidJumps[block.id] ?? []);
+
+      const markers: monaco.editor.IMarkerData[] = blockJumps
+          .filter(jump => !jump.isDynamic && invalidTargets.has(jump.target) && !JUMP_KEYWORD_TARGETS.has(jump.target))
+          .map(jump => ({
+              startLineNumber: jump.line,
+              // columnStart/columnEnd in JumpLocation are 0-indexed; Monaco uses 1-indexed columns.
+              startColumn: jump.columnStart + 1,
+              endLineNumber: jump.line,
+              endColumn: jump.columnEnd + 1,
+              message: `Invalid jump: Label '${jump.target}' not found in project.`,
+              severity: monacoInstance.MarkerSeverity.Error,
+          }));
+
+      monacoInstance.editor.setModelMarkers(model, 'renpy', markers);
   }, [analysisResult, isMounted]);
   
   useEffect(() => {

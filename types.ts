@@ -797,6 +797,8 @@ declare global {
     electronAPI?: {
           openDirectory: () => Promise<string | null>;
           createProject?: () => Promise<string | null>;
+          checkRenpyProject?: (path: string) => Promise<{ hasGameFolder: boolean; isRenpyProject: boolean }>;
+          cancelProjectLoad?: () => void;
           loadProject: (path: string) => Promise<any>;
           refreshProjectTree: (path: string) => Promise<any>;
           writeFile: (path: string, content: string, encoding?: string) => Promise<{ success: boolean; error?: string }>;

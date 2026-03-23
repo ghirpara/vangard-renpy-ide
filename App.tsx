@@ -384,6 +384,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const loadCancelRef = useRef(false);
+  const [nonRenpyWarningPath, setNonRenpyWarningPath] = useState<string | null>(null);
   
   const [deleteConfirmInfo, setDeleteConfirmInfo] = useState<{ paths: string[]; onConfirm: () => void; } | null>(null);
   const [createBlockModalOpen, setCreateBlockModalOpen] = useState(false);
@@ -1108,11 +1110,18 @@ const App: React.FC = () => {
   // --- File System Integration ---
   
   const loadProject = useCallback(async (path: string) => {
+      loadCancelRef.current = false;
       setIsLoading(true);
       setLoadingMessage('Reading project files...');
       setStatusBarMessage(`Loading project from ${path}...`);
       try {
           const projectData = await window.electronAPI!.loadProject(path);
+
+          // If the user cancelled while the directory was being read, discard results.
+          if (loadCancelRef.current) {
+              setStatusBarMessage('');
+              return;
+          }
           
           // Map existing blocks to preserve IDs and positions
           const existingBlocksMap = new Map<string, Block>();
@@ -1401,21 +1410,52 @@ const App: React.FC = () => {
           setStatusBarMessage('Project loaded.');
           setTimeout(() => setStatusBarMessage(''), 3000);
       } catch (err) {
+          if (loadCancelRef.current) {
+              setStatusBarMessage('');
+              return;
+          }
           console.error(err);
           addToast('Failed to load project', 'error');
           setStatusBarMessage('Error loading project.');
       } finally {
           setIsLoading(false);
+          setLoadingMessage('');
+          setLoadingProgress(0);
       }
   }, [setBlocks, setImages, setAudios, updateProjectSettings, addToast, setFileSystemTree, setStickyNotes, setCharacterProfiles, updateAppSettings, setSceneCompositions, setSceneNames, setPunchlistMetadata]);
 
+
+  const handleCancelLoad = useCallback(() => {
+      loadCancelRef.current = true;
+      // Terminate the worker thread in the main process immediately.
+      // The overlay stays visible in its "Cancelling..." state (local state in LoadingOverlay)
+      // until the worker exits and the finally block in loadProject sets isLoading = false.
+      // We deliberately do NOT call setIsLoading(false) here — doing so with flushSync caused
+      // a blocking synchronous render that prevented Electron's IPC quit handshake from
+      // being processed, making File->Quit appear broken for several seconds after cancel.
+      window.electronAPI?.cancelProjectLoad?.();
+      addToast('Project loading cancelled.', 'info');
+  }, [addToast]);
+
+  // Checks whether the selected folder looks like a Ren'Py project before loading.
+  // If it doesn't (no game/ folder, no .rpy files), shows a confirmation warning first.
+  const handleOpenWithRenpyCheck = useCallback(async (path: string) => {
+      if (window.electronAPI?.checkRenpyProject) {
+          const check = await window.electronAPI.checkRenpyProject(path);
+          if (!check.isRenpyProject) {
+              setNonRenpyWarningPath(path);
+              return;
+          }
+      }
+      await loadProject(path);
+  }, [loadProject]);
 
   const handleOpenProjectFolder = useCallback(async () => {
     try {
         if (window.electronAPI) {
             const path = await window.electronAPI.openDirectory();
             if (path) {
-                await loadProject(path);
+                await handleOpenWithRenpyCheck(path);
             }
         } else {
             alert("To use local file system features, please run this app in Electron or use a compatible browser with FS Access API support (Chrome/Edge). For now, you are in Browser Mode.");
@@ -1424,7 +1464,7 @@ const App: React.FC = () => {
         console.error(err);
         addToast('Failed to open project', 'error');
     }
-  }, [loadProject, addToast]);
+  }, [handleOpenWithRenpyCheck, addToast]);
 
   const handleCreateProject = useCallback(async () => {
       try {
@@ -2488,7 +2528,7 @@ const App: React.FC = () => {
         const removeListener = window.electronAPI.onMenuCommand((data: { command: string, type?: 'canvas' | 'route-canvas' | 'punchlist' | 'ai-generator', path?: string }) => {
             if (data.command === 'new-project') handleNewProjectRequest();
             if (data.command === 'open-project') handleOpenProjectFolder();
-            if (data.command === 'open-recent' && data.path) loadProject(data.path);
+            if (data.command === 'open-recent' && data.path) handleOpenWithRenpyCheck(data.path);
             if (data.command === 'save-all') handleSaveAll();
             if (data.command === 'run-project' && projectRootPath) window.electronAPI?.runGame(appSettings.renpyPath, projectRootPath);
             if (data.command === 'stop-project') window.electronAPI?.stopGame();
@@ -2501,7 +2541,7 @@ const App: React.FC = () => {
             if (data.command === 'toggle-right-sidebar') updateAppSettings(draft => { draft.isRightSidebarOpen = !draft.isRightSidebarOpen; });
         });
         return removeListener;
-  }, [handleNewProjectRequest, handleOpenProjectFolder, loadProject, handleSaveAll, projectRootPath, appSettings.renpyPath, handleOpenStaticTab, handleToggleSearch, updateAppSettings]);
+  }, [handleNewProjectRequest, handleOpenProjectFolder, handleOpenWithRenpyCheck, loadProject, handleSaveAll, projectRootPath, appSettings.renpyPath, handleOpenStaticTab, handleToggleSearch, updateAppSettings]);
 
   // --- Game Running State ---
   useEffect(() => {
@@ -3160,17 +3200,36 @@ const App: React.FC = () => {
       </div>
 
       {/* Modals and Overlays */}
-      {showWelcome && (
-        <WelcomeScreen 
+      {showWelcome && !isLoading && (
+        <WelcomeScreen
             onOpenProject={handleOpenProjectFolder}
             onCreateProject={handleCreateProject}
             isElectron={!!window.electronAPI}
             recentProjects={appSettings.recentProjects}
-            onOpenRecent={loadProject}
+            onOpenRecent={handleOpenWithRenpyCheck}
         />
       )}
-      
-      {isLoading && <LoadingOverlay progress={loadingProgress} message={loadingMessage} />}
+
+      {nonRenpyWarningPath && (
+        <ConfirmModal
+          title="Folder may not be a Ren'Py project"
+          confirmText="Open Anyway"
+          confirmClassName="bg-indigo-600 hover:bg-indigo-700"
+          onConfirm={() => {
+            const path = nonRenpyWarningPath;
+            setNonRenpyWarningPath(null);
+            loadProject(path);
+          }}
+          onClose={() => setNonRenpyWarningPath(null)}
+        >
+          The selected folder doesn't appear to contain a Ren'Py project — no{' '}
+          <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded text-sm">game/</code>{' '}
+          folder or <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded text-sm">.rpy</code>{' '}
+          files were found. You can still open it, but it may not work as expected.
+        </ConfirmModal>
+      )}
+
+      {isLoading && <LoadingOverlay progress={loadingProgress} message={loadingMessage} onCancel={handleCancelLoad} />}
       
       <div className="fixed bottom-4 right-4 z-[9999] flex flex-col space-y-2 pointer-events-none">
         {toasts.map(toast => (

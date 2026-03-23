@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   createProject: () => ipcRenderer.invoke('dialog:createProject'),
+  checkRenpyProject: (rootPath) => ipcRenderer.invoke('dialog:checkRenpyProject', rootPath),
+  cancelProjectLoad: () => ipcRenderer.send('project:cancel-load'),
   loadProject: (rootPath) => ipcRenderer.invoke('project:load', rootPath),
   refreshProjectTree: (rootPath) => ipcRenderer.invoke('project:refresh-tree', rootPath),
   writeFile: (filePath, content, encoding) => ipcRenderer.invoke('fs:writeFile', filePath, content, encoding),

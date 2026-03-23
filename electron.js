@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import { createReadStream } from 'fs';
 import { Readable } from 'stream';
 import { spawn } from 'child_process';
+import { Worker } from 'worker_threads';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -127,7 +128,37 @@ async function getApiKey(provider) {
 }
 
 
-async function readProjectFiles(rootPath, { readContent = true } = {}) {
+async function checkRenpyProject(rootPath) {
+    try {
+        const entries = await fs.readdir(rootPath, { withFileTypes: true });
+        const hasGameFolder = entries.some(e => e.isDirectory() && e.name.toLowerCase() === 'game');
+        const hasRpyAtRoot = entries.some(e => e.isFile() && /\.rpy$/i.test(e.name));
+        let hasRpyInGame = false;
+        if (hasGameFolder) {
+            try {
+                const gameEntries = await fs.readdir(path.join(rootPath, 'game'), { withFileTypes: true });
+                hasRpyInGame = gameEntries.some(e => e.isFile() && /\.rpy$/i.test(e.name));
+            } catch { /* ignore */ }
+        }
+        return { hasGameFolder, isRenpyProject: hasGameFolder || hasRpyAtRoot || hasRpyInGame };
+    } catch {
+        return { hasGameFolder: false, isRenpyProject: false };
+    }
+}
+
+// Active worker for project loading — replaced on each load, terminated on cancel.
+let activeLoadWorker = null;
+
+// Inline worker code for reading project files in a dedicated thread.
+// Using String.raw to preserve backslashes in regex patterns.
+const PROJECT_LOAD_WORKER_CODE = String.raw`
+const { workerData, parentPort } = require('worker_threads');
+const path = require('path');
+const fs = require('fs/promises');
+const { pathToFileURL } = require('url');
+
+async function run() {
+    const { rootPath, readContent } = workerData;
     const results = {
         rootPath,
         files: [],
@@ -143,7 +174,6 @@ async function readProjectFiles(rootPath, { readContent = true } = {}) {
         for (const entry of entries) {
             const fullPath = path.join(dirPath, entry.name);
             const relativePath = path.relative(rootPath, fullPath).replace(/\\/g, '/');
-            
             const childNode = { name: entry.name, path: relativePath, children: entry.isDirectory() ? [] : undefined };
 
             if (entry.isDirectory()) {
@@ -157,21 +187,11 @@ async function readProjectFiles(rootPath, { readContent = true } = {}) {
                 } else if (/\.(png|jpe?g|webp)$/i.test(entry.name)) {
                     const stats = await fs.stat(fullPath);
                     const mediaUrl = pathToFileURL(fullPath).toString().replace(/^file:/, 'media:');
-                    results.images.push({ 
-                        path: relativePath, 
-                        dataUrl: mediaUrl, 
-                        lastModified: stats.mtimeMs,
-                        size: stats.size
-                    });
+                    results.images.push({ path: relativePath, dataUrl: mediaUrl, lastModified: stats.mtimeMs, size: stats.size });
                 } else if (/\.(mp3|ogg|wav|opus)$/i.test(entry.name)) {
                     const stats = await fs.stat(fullPath);
                     const mediaUrl = pathToFileURL(fullPath).toString().replace(/^file:/, 'media:');
-                    results.audios.push({ 
-                        path: relativePath, 
-                        dataUrl: mediaUrl, 
-                        lastModified: stats.mtimeMs,
-                        size: stats.size
-                    });
+                    results.audios.push({ path: relativePath, dataUrl: mediaUrl, lastModified: stats.mtimeMs, size: stats.size });
                 }
             }
             children.push(childNode);
@@ -185,7 +205,7 @@ async function readProjectFiles(rootPath, { readContent = true } = {}) {
     };
 
     await readDirRecursive(rootPath, results.tree);
-    
+
     try {
         const settingsContent = await fs.readFile(path.join(rootPath, 'game', 'project.ide.json'), 'utf-8');
         results.settings = JSON.parse(settingsContent);
@@ -193,7 +213,50 @@ async function readProjectFiles(rootPath, { readContent = true } = {}) {
         results.settings = {};
     }
 
-    return results;
+    parentPort.postMessage({ ok: true, data: results });
+}
+
+run().catch(err => parentPort.postMessage({ ok: false, error: err.message }));
+`;
+
+function readProjectFiles(rootPath, { readContent = true } = {}) {
+    return new Promise((resolve, reject) => {
+        const worker = new Worker(PROJECT_LOAD_WORKER_CODE, {
+            eval: true,
+            workerData: { rootPath, readContent }
+        });
+        activeLoadWorker = worker;
+        let settled = false;
+
+        worker.on('message', (msg) => {
+            settled = true;
+            activeLoadWorker = null;
+            if (msg.ok) {
+                resolve(msg.data);
+            } else {
+                reject(new Error(msg.error));
+            }
+        });
+
+        worker.on('error', (err) => {
+            if (settled) return;
+            settled = true;
+            activeLoadWorker = null;
+            reject(err);
+        });
+
+        worker.on('exit', (code) => {
+            if (activeLoadWorker === worker) activeLoadWorker = null;
+            // Non-zero exit without a prior message means the worker was terminated
+            // (e.g. via worker.terminate() on cancel) or crashed. Either way, reject
+            // so the caller's catch block runs; the cancel flag in App.tsx suppresses
+            // any UI error in the cancel case.
+            if (!settled && code !== 0) {
+                settled = true;
+                reject(new Error('LOAD_CANCELLED'));
+            }
+        });
+    });
 }
 
 async function scanDirectoryForAssets(dirPath) {
@@ -629,6 +692,18 @@ app.whenReady().then(() => {
     const { canceled, filePath } = await dialog.showSaveDialog(options);
     if (canceled) return null;
     return filePath;
+  });
+
+  ipcMain.handle('dialog:checkRenpyProject', async (event, rootPath) => {
+    return await checkRenpyProject(rootPath);
+  });
+
+  // Fire-and-forget: renderer sends this to immediately terminate the active load worker.
+  ipcMain.on('project:cancel-load', () => {
+    if (activeLoadWorker) {
+      activeLoadWorker.terminate();
+      activeLoadWorker = null;
+    }
   });
 
   ipcMain.handle('project:load', async (event, rootPath) => {
