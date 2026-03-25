@@ -811,7 +811,7 @@ const RouteCanvas: React.FC<RouteCanvasProps> = ({ labelNodes, routeLinks, ident
         </>
       )}
       {/* Bottom-left controls: Fit + Legend */}
-      <div className="absolute bottom-4 left-4 z-20 flex flex-col items-start gap-2">
+      <div className="absolute bottom-4 left-4 z-20 flex flex-col items-start gap-2" onPointerDown={e => e.stopPropagation()}>
         <button
           onClick={fitToScreen}
           title="Fit all nodes to screen (F)"
