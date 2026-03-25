@@ -1,10 +1,10 @@
 # Changelog
 
-All notable changes to Vangard Ren'Py IDE are documented here.
+All notable changes to Vangard Ren'Py IDE are documented here. Note that this is a rolling changelog that gets periodically updated as a release is being worked. Items that are listed under a version that is marked (Not Yet Released) are not formally part of a release. They are availble as part of the "latest" commits in the codebase and are likely to be part of the next release, but are not gauranteed to be so. 
 
 ---
 
-## [v0.7.0] — Public Beta 4
+## [v0.7.0] — Public Beta 4 (Not Yet Released)
 
 ### New Features
 
