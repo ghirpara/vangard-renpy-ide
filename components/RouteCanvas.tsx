@@ -83,9 +83,9 @@ const getOptimalPath = (sourceNode: LabelNode, targetNode: LabelNode): [Position
 
     for (const sKey of Object.keys(sourcePoints)) {
         for (const tKey of Object.keys(targetPoints)) {
-            // @ts-ignore
+            // @ts-expect-error — dynamic key access on typed object
             const p1 = sourcePoints[sKey];
-            // @ts-ignore
+            // @ts-expect-error — dynamic key access on typed object
             const p2 = targetPoints[tKey];
             const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
             
@@ -197,7 +197,7 @@ const BlockContainer: React.FC<{
     title: string; 
     rect: Rect; 
     isDimmed: boolean; 
-}> = ({ id, title, rect, isDimmed }) => {
+}> = ({ id: _id, title, rect, isDimmed }) => {
     // Add padding to the visual box
     const padding = 20;
     const x = rect.x - padding;

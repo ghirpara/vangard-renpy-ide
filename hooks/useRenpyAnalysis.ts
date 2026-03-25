@@ -7,7 +7,7 @@
  */
 
 import { useMemo } from 'react';
-import type { Block, Link, RenpyAnalysisResult, LabelLocation, JumpLocation, Character, DialogueLine, Variable, VariableUsage, RenpyScreen, LabelNode, RouteLink, IdentifiedRoute } from '../types';
+import type { Block, RenpyAnalysisResult, LabelLocation, JumpLocation, Character, Variable, RenpyScreen, LabelNode, RouteLink, IdentifiedRoute } from '../types';
 
 const LABEL_REGEX = /^\s*label\s+([a-zA-Z0-9_]+):/;
 const JUMP_CALL_EXPRESSION_REGEX = /\b(jump|call)\s+expression\s+(?:"([a-zA-Z0-9_]+)"|'([a-zA-Z0-9_]+)'|([a-zA-Z0-9_.]+))/g;

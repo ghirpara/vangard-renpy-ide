@@ -1,11 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { validateRenpyCode } from './renpyValidator';
 
-// Helper: run validator and return only messages for easy assertion
-function msgs(code: string) {
-  return validateRenpyCode(code).map(d => d.message);
-}
-
 function errors(code: string) {
   return validateRenpyCode(code).filter(d => d.severity === 'error').map(d => d.message);
 }

@@ -45,8 +45,6 @@ const IMAGE_NAME_RESERVED = new Set([
   'at', 'as', 'behind', 'onlayer', 'with', 'zorder',
 ]);
 
-const VOICE_KEYWORDS = new Set(['sustain', 'silence', 'replay', 'stop', 'clear']);
-
 // Python keywords that make `$ kw == expr` a valid (non-assignment) expression
 const PYTHON_KEYWORDS = new Set([
   'assert', 'if', 'while', 'for', 'not', 'and', 'or', 'in', 'is',
