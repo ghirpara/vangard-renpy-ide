@@ -68,7 +68,7 @@ interface StoryElementsPanelProps {
     onDeleteSnippet?: (snippetId: string) => void;
 }
 
-type Tab = 'characters' | 'variables' | 'images' | 'audio' | 'screens' | 'snippets' | 'scenes' | 'menus';
+type Tab = 'characters' | 'variables' | 'images' | 'audio' | 'screens' | 'snippets' | 'composers' | 'menus';
 
 const TabButton: React.FC<{
   label: string;
@@ -128,7 +128,7 @@ const StoryElementsPanel: React.FC<StoryElementsPanelProps> = ({
                 <TabButton className="flex-grow" label="Img" count={projectImages.size} isActive={activeTab === 'images'} onClick={() => setActiveTab('images')} />
                 <TabButton className="flex-grow" label="Snd" count={projectAudios.size} isActive={activeTab === 'audio'} onClick={() => setActiveTab('audio')} />
                 <TabButton className="flex-grow" label="Scrn" count={analysisResult.screens.size} isActive={activeTab === 'screens'} onClick={() => setActiveTab('screens')} />
-                <TabButton className="flex-grow" label="Scenes" count={scenes.length} isActive={activeTab === 'scenes'} onClick={() => setActiveTab('scenes')} />
+                <TabButton className="flex-grow" label="Composers" count={scenes.length + imagemaps.length} isActive={activeTab === 'composers'} onClick={() => setActiveTab('composers')} />
                 <TabButton className="flex-grow" label="Menus" isActive={activeTab === 'menus'} onClick={() => setActiveTab('menus')} />
                 <TabButton className="flex-grow" label="Code" isActive={activeTab === 'snippets'} onClick={() => setActiveTab('snippets')} />
             </nav>
@@ -230,7 +230,7 @@ const StoryElementsPanel: React.FC<StoryElementsPanelProps> = ({
                         />
                     </div>
                 )}
-                {activeTab === 'scenes' && (
+                {activeTab === 'composers' && (
                     <div className="flex-grow overflow-y-auto p-4 overscroll-contain space-y-3">
                         <div className="flex justify-between items-center">
                             <h3 className="font-semibold">Scene Compositions ({scenes.length})</h3>
