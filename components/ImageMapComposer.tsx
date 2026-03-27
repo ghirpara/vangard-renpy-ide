@@ -32,6 +32,8 @@ const ImageMapComposer: React.FC<ImageMapComposerProps> = ({
     const canvasRef = useRef<HTMLDivElement>(null);
     const nameInputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const groundImageInputRef = useRef<HTMLInputElement>(null);
+    const hoverImageInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         setEditName(imagemapName);
@@ -196,6 +198,46 @@ const ImageMapComposer: React.FC<ImageMapComposerProps> = ({
         }
     };
 
+    const handleGroundImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const dataUrl = evt.target?.result as string;
+            const newImage: ProjectImage = {
+                fileName: file.name,
+                filePath: file.name,
+                dataUrl: dataUrl
+            };
+            onImageMapChange(prev => ({ ...prev, groundImage: newImage }));
+        };
+        reader.readAsDataURL(file);
+
+        // Reset input so the same file can be selected again
+        e.target.value = '';
+    };
+
+    const handleHoverImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const dataUrl = evt.target?.result as string;
+            const newImage: ProjectImage = {
+                fileName: file.name,
+                filePath: file.name,
+                dataUrl: dataUrl
+            };
+            onImageMapChange(prev => ({ ...prev, hoverImage: newImage }));
+        };
+        reader.readAsDataURL(file);
+
+        // Reset input so the same file can be selected again
+        e.target.value = '';
+    };
+
     const generateCode = (): string => {
         if (!imagemap.groundImage) {
             return '# Add a ground image to generate code';
@@ -318,10 +360,18 @@ const ImageMapComposer: React.FC<ImageMapComposerProps> = ({
                             <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                                 Ground Image
                             </label>
+                            <input
+                                ref={groundImageInputRef}
+                                type="file"
+                                accept="image/*"
+                                onChange={handleGroundImageUpload}
+                                className="hidden"
+                            />
                             <div
                                 onDrop={handleGroundImageDrop}
                                 onDragOver={(e) => e.preventDefault()}
-                                className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded p-2 text-center hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors"
+                                onClick={() => !imagemap.groundImage && groundImageInputRef.current?.click()}
+                                className={`border-2 border-dashed border-gray-300 dark:border-gray-600 rounded p-2 text-center hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors ${!imagemap.groundImage ? 'cursor-pointer' : ''}`}
                             >
                                 {imagemap.groundImage ? (
                                     <div className="space-y-2">
@@ -341,9 +391,14 @@ const ImageMapComposer: React.FC<ImageMapComposerProps> = ({
                                         </button>
                                     </div>
                                 ) : (
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                        Drag an image here
-                                    </p>
+                                    <div className="py-2">
+                                        <svg className="w-8 h-8 mx-auto mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                                            Click to upload or drag an image
+                                        </p>
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -353,10 +408,18 @@ const ImageMapComposer: React.FC<ImageMapComposerProps> = ({
                             <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
                                 Hover Image (Optional)
                             </label>
+                            <input
+                                ref={hoverImageInputRef}
+                                type="file"
+                                accept="image/*"
+                                onChange={handleHoverImageUpload}
+                                className="hidden"
+                            />
                             <div
                                 onDrop={handleHoverImageDrop}
                                 onDragOver={(e) => e.preventDefault()}
-                                className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded p-2 text-center hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors"
+                                onClick={() => !imagemap.hoverImage && hoverImageInputRef.current?.click()}
+                                className={`border-2 border-dashed border-gray-300 dark:border-gray-600 rounded p-2 text-center hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors ${!imagemap.hoverImage ? 'cursor-pointer' : ''}`}
                             >
                                 {imagemap.hoverImage ? (
                                     <div className="space-y-2">
@@ -376,9 +439,14 @@ const ImageMapComposer: React.FC<ImageMapComposerProps> = ({
                                         </button>
                                     </div>
                                 ) : (
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                        Drag an image here
-                                    </p>
+                                    <div className="py-2">
+                                        <svg className="w-8 h-8 mx-auto mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                                            Click to upload or drag an image
+                                        </p>
+                                    </div>
                                 )}
                             </div>
                         </div>
