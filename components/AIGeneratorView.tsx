@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import type { Block, RenpyAnalysisResult } from '../types';
+import CopyButton from './CopyButton';
 
 interface AIGeneratorViewProps {
   currentBlockId: string;
@@ -168,16 +169,6 @@ const AIGeneratorView: React.FC<AIGeneratorViewProps> = ({
     }
   }, [prompt, model, savedApiKey, includeContext, renpyOnly, getCurrentContext]);
 
-  const handleInsert = useCallback(async () => {
-    if (response.trim()) {
-      try {
-        await navigator.clipboard.writeText(response.trim());
-        // Optionally show a toast or something, but for now just copy
-      } catch (err) {
-        console.error('Failed to copy to clipboard:', err);
-      }
-    }
-  }, [response]);
 
   const currentBlock = blocks.find(b => b.id === currentBlockId);
 
@@ -312,12 +303,7 @@ const AIGeneratorView: React.FC<AIGeneratorViewProps> = ({
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">Generated Content</h3>
-                <button
-                  onClick={handleInsert}
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-                >
-                  Copy to Clipboard
-                </button>
+                <CopyButton text={response.trim()} size="md" />
               </div>
               <pre className="whitespace-pre-wrap text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-700 p-4 rounded-md border text-sm overflow-auto max-h-96">
                 {response}

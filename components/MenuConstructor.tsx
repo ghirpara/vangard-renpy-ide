@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import type { RenpyAnalysisResult } from '../types';
+import CopyButton from './CopyButton';
 
 interface MenuConstructorProps {
     analysisResult: RenpyAnalysisResult;
@@ -232,9 +233,6 @@ const MenuConstructor: React.FC<MenuConstructorProps> = ({ analysisResult }) => 
         setChoices(newChoices);
     };
 
-    const copyToClipboard = () => {
-        navigator.clipboard.writeText(code);
-    };
 
     const handleClear = () => {
         setCaption('');
@@ -355,7 +353,7 @@ const MenuConstructor: React.FC<MenuConstructorProps> = ({ analysisResult }) => 
             <div className="h-1/3 bg-gray-50 dark:bg-gray-950 flex flex-col border-t border-gray-200 dark:border-gray-700">
                 <div className="flex justify-between items-center px-3 py-1 bg-gray-200 dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700">
                     <span className="text-xs font-bold text-gray-500 uppercase">Generated Code</span>
-                    <button onClick={copyToClipboard} className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Copy to Clipboard</button>
+                    <CopyButton text={code} size="xs" />
                 </div>
                 <textarea 
                     value={code}

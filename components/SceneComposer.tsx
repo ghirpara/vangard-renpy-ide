@@ -1,8 +1,16 @@
 
 
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import type { ProjectImage, ImageMetadata, SceneComposition, SceneSprite } from '../types';
+import CopyButton from './CopyButton';
+
+const PRESET_RESOLUTIONS = [
+    { label: '1920×1080 (16:9)', width: 1920, height: 1080 },
+    { label: '1280×720 (16:9)',  width: 1280, height: 720  },
+    { label: '1024×768 (4:3)',   width: 1024, height: 768  },
+    { label: '800×600 (4:3)',    width: 800,  height: 600  },
+];
 
 interface SceneComposerProps {
     images: ProjectImage[];
@@ -29,10 +37,21 @@ const SceneComposer: React.FC<SceneComposerProps> = ({ images, metadata, scene, 
     const nameInputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // Reference resolution for the project (standard 1080p)
-    const REF_WIDTH = 1920;
-    const REF_HEIGHT = 1080;
-    
+    // Reference resolution — derived from scene, defaults to 1920×1080
+    const REF_WIDTH = scene.resolution?.width ?? 1920;
+    const REF_HEIGHT = scene.resolution?.height ?? 1080;
+    const isCustomResolution = !PRESET_RESOLUTIONS.some(p => p.width === REF_WIDTH && p.height === REF_HEIGHT);
+
+    const [showCustomInputs, setShowCustomInputs] = useState(() => isCustomResolution);
+    const [customW, setCustomW] = useState(String(REF_WIDTH));
+    const [customH, setCustomH] = useState(String(REF_HEIGHT));
+
+    // Keep custom inputs in sync when scene resolution changes externally (e.g. project load)
+    useEffect(() => {
+        setCustomW(String(REF_WIDTH));
+        setCustomH(String(REF_HEIGHT));
+    }, [REF_WIDTH, REF_HEIGHT]);
+
     const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
 
     useEffect(() => {
@@ -492,10 +511,6 @@ const SceneComposer: React.FC<SceneComposerProps> = ({ images, metadata, scene, 
         return code;
     }, [scene, metadata]);
 
-    const copyToClipboard = () => {
-        navigator.clipboard.writeText(generatedCode);
-    };
-
     const activeSprite = useMemo(() => {
         if (selectedSpriteId === 'background') return scene.background;
         return scene.sprites.find(s => s.id === selectedSpriteId) || null;
@@ -555,6 +570,28 @@ const SceneComposer: React.FC<SceneComposerProps> = ({ images, metadata, scene, 
         }
     };
 
+    const handleResolutionDropdownChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value;
+        if (val === 'custom') {
+            setShowCustomInputs(true);
+        } else {
+            const [w, h] = val.split('x').map(Number);
+            setShowCustomInputs(false);
+            onSceneChange(prev => ({ ...prev, resolution: { width: w, height: h } }));
+        }
+    }, [onSceneChange]);
+
+    const applyCustomResolution = useCallback(() => {
+        const w = parseInt(customW);
+        const h = parseInt(customH);
+        if (w > 0 && h > 0) {
+            onSceneChange(prev => ({ ...prev, resolution: { width: w, height: h } }));
+        }
+    }, [customW, customH, onSceneChange]);
+
+    const resolutionDropdownValue = (showCustomInputs || isCustomResolution) ? 'custom' : `${REF_WIDTH}x${REF_HEIGHT}`;
+    const showResolutionInputs = showCustomInputs || isCustomResolution;
+
     return (
         <div ref={containerRef} className="flex h-full bg-gray-100 dark:bg-gray-900 overflow-hidden flex-col outline-none">
             {/* Toolbar */}
@@ -611,9 +648,51 @@ const SceneComposer: React.FC<SceneComposerProps> = ({ images, metadata, scene, 
                         )}
                         <span>{isExporting ? 'Exporting...' : 'Export Image'}</span>
                     </button>
+                    <div className="h-6 w-px bg-gray-300 dark:bg-gray-600"></div>
+                    <div className="flex items-center space-x-1">
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wide hidden md:inline">Res:</span>
+                        <select
+                            value={resolutionDropdownValue}
+                            onChange={handleResolutionDropdownChange}
+                            className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded border border-gray-300 dark:border-gray-600 px-2 py-1"
+                            aria-label="Canvas resolution"
+                        >
+                            {PRESET_RESOLUTIONS.map(p => (
+                                <option key={`${p.width}x${p.height}`} value={`${p.width}x${p.height}`}>{p.label}</option>
+                            ))}
+                            <option value="custom">Custom...</option>
+                        </select>
+                        {showResolutionInputs && (
+                            <>
+                                <input
+                                    type="number"
+                                    value={customW}
+                                    onChange={e => setCustomW(e.target.value)}
+                                    onBlur={applyCustomResolution}
+                                    onKeyDown={e => e.key === 'Enter' && applyCustomResolution()}
+                                    className="text-xs w-14 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded border border-gray-300 dark:border-gray-600 px-1 py-1 text-center"
+                                    min={1}
+                                    placeholder="W"
+                                    aria-label="Custom width"
+                                />
+                                <span className="text-xs text-gray-400">×</span>
+                                <input
+                                    type="number"
+                                    value={customH}
+                                    onChange={e => setCustomH(e.target.value)}
+                                    onBlur={applyCustomResolution}
+                                    onKeyDown={e => e.key === 'Enter' && applyCustomResolution()}
+                                    className="text-xs w-14 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded border border-gray-300 dark:border-gray-600 px-1 py-1 text-center"
+                                    min={1}
+                                    placeholder="H"
+                                    aria-label="Custom height"
+                                />
+                            </>
+                        )}
+                    </div>
                 </div>
                 <div className="flex items-center space-x-2 text-xs text-gray-400">
-                    <span className="hidden md:inline">Ref: 1920x1080 • Shift + Arrow to Nudge</span>
+                    <span className="hidden md:inline">Ref: {REF_WIDTH}×{REF_HEIGHT} • Shift + Arrow to Nudge</span>
                     <span className="w-px h-3 bg-gray-300 dark:bg-gray-600 mx-2"></span>
                     <span>Drag images from right panel</span>
                 </div>
@@ -813,7 +892,7 @@ const SceneComposer: React.FC<SceneComposerProps> = ({ images, metadata, scene, 
                     <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex-shrink-0">
                         <div className="flex justify-between items-center px-2 py-1">
                             <span className="text-[10px] font-bold text-gray-400 uppercase">Code Preview</span>
-                            <button onClick={copyToClipboard} className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium">Copy to Clipboard</button>
+                            <CopyButton text={generatedCode} size="xs" />
                         </div>
                         <pre className="p-3 font-mono text-xs overflow-auto text-gray-600 dark:text-gray-400 select-text max-h-24 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
                             {generatedCode}

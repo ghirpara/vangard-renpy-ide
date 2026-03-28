@@ -1374,7 +1374,8 @@ const App: React.FC = () => {
 
               const rehydrateScene = (sc: SerializedSceneComposition): SceneComposition => ({
                   background: sc.background ? rehydrateSprite(sc.background) : null,
-                  sprites: (sc.sprites || []).map(rehydrateSprite)
+                  sprites: (sc.sprites || []).map(rehydrateSprite),
+                  resolution: sc.resolution,
               });
 
               if (projectData.settings.sceneCompositions) {
@@ -1383,7 +1384,8 @@ const App: React.FC = () => {
                       const comp = sc as unknown as SerializedSceneComposition;
                       restoredScenes[id] = {
                           background: comp.background ? rehydrateSprite(comp.background) : null,
-                          sprites: comp.sprites.map(rehydrateSprite)
+                          sprites: comp.sprites.map(rehydrateSprite),
+                          resolution: comp.resolution,
                       };
                   });
                   setSceneCompositions(restoredScenes);
@@ -1904,7 +1906,8 @@ const App: React.FC = () => {
       Object.entries(sceneCompositions).forEach(([id, sc]) => {
           serializableScenes[id] = {
               background: sc.background ? serializeSprite(sc.background) : null,
-              sprites: sc.sprites.map(serializeSprite)
+              sprites: sc.sprites.map(serializeSprite),
+              resolution: sc.resolution,
           };
       });
 

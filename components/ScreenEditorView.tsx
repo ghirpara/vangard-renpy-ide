@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { ScreenModel, ScreenComponent, ProjectImage } from '../types';
 import { useImmer } from 'use-immer';
+import CopyButton from './CopyButton';
 
 interface ScreenEditorViewProps {
   screenModel: ScreenModel;
@@ -142,10 +143,6 @@ export default function ScreenEditorView({ screenModel, onChange, projectImages 
     return code;
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(generateRenpyCode());
-    alert("Ren'Py code copied to clipboard!");
-  };
 
   // --- Drag and Drop Logic for Layers ---
   const handleDragStart = (e: React.DragEvent, id: string) => {
@@ -366,12 +363,7 @@ export default function ScreenEditorView({ screenModel, onChange, projectImages 
       {/* Center: Canvas */}
       <div className="flex-1 flex flex-col relative bg-gray-200 dark:bg-gray-900 overflow-hidden">
         <div className="absolute top-2 right-2 z-10 flex space-x-2">
-          <button 
-            onClick={copyToClipboard}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded shadow text-sm"
-          >
-            Copy Code
-          </button>
+          <CopyButton text={generateRenpyCode()} />
         </div>
         
         <div className="flex-1 overflow-auto p-8 flex items-center justify-center">

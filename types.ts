@@ -664,10 +664,12 @@ export interface SceneSprite {
  * @interface SceneComposition
  * @property {SceneSprite | null} background - Background image (null if none)
  * @property {SceneSprite[]} sprites - Array of foreground sprites
+ * @property {{ width: number; height: number }} [resolution] - Reference canvas resolution (defaults to 1920×1080)
  */
 export interface SceneComposition {
   background: SceneSprite | null;
   sprites: SceneSprite[];
+  resolution?: { width: number; height: number };
 }
 
 /**
@@ -991,6 +993,7 @@ export interface SerializedSprite {
 export interface SerializedSceneComposition {
   background: SerializedSprite | null;
   sprites: SerializedSprite[];
+  resolution?: { width: number; height: number };
 }
 
 /**

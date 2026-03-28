@@ -1,6 +1,7 @@
 
-import React, { useState } from 'react';
+import React from 'react';
 import type { UserSnippet } from '../types';
+import CopyButton from './CopyButton';
 
 interface Snippet {
   title: string;
@@ -221,14 +222,6 @@ interface SnippetManagerProps {
 }
 
 const SnippetManager: React.FC<SnippetManagerProps> = ({ categoriesState = {}, onToggleCategory, userSnippets, onCreateSnippet, onEditSnippet, onDeleteSnippet }) => {
-    const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
-
-    const handleCopy = (code: string, title: string) => {
-        navigator.clipboard.writeText(code);
-        setCopiedSnippet(title);
-        setTimeout(() => setCopiedSnippet(null), 2000);
-    };
-
     return (
         <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -262,12 +255,7 @@ const SnippetManager: React.FC<SnippetManagerProps> = ({ categoriesState = {}, o
                                         </p>
                                     </div>
                                     <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
-                                        <button
-                                            onClick={() => handleCopy(snippet.code, snippet.title)}
-                                            className={`px-2 py-1 text-xs font-semibold rounded ${copiedSnippet === snippet.title ? 'bg-green-600 text-white' : 'bg-gray-200 dark:bg-gray-600 hover:bg-indigo-100 dark:hover:bg-indigo-800'}`}
-                                        >
-                                            {copiedSnippet === snippet.title ? 'Copied!' : 'Copy'}
-                                        </button>
+                                        <CopyButton text={snippet.code} label="Copy" size="xs" />
                                         {onEditSnippet && (
                                             <button
                                                 onClick={() => onEditSnippet(snippet)}
@@ -319,12 +307,7 @@ const SnippetManager: React.FC<SnippetManagerProps> = ({ categoriesState = {}, o
                                             <p className="font-semibold">{snippet.title}</p>
                                             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{snippet.description}</p>
                                         </div>
-                                        <button
-                                            onClick={() => handleCopy(snippet.code, snippet.title)}
-                                            className={`px-2 py-1 text-xs font-semibold rounded ${copiedSnippet === snippet.title ? 'bg-green-600 text-white' : 'bg-gray-200 dark:bg-gray-600 hover:bg-indigo-100 dark:hover:bg-indigo-800'}`}
-                                        >
-                                            {copiedSnippet === snippet.title ? 'Copied!' : 'Copy'}
-                                        </button>
+                                        <CopyButton text={snippet.code} label="Copy" size="xs" />
                                     </div>
                                     <pre className="bg-gray-800 text-white p-2 rounded text-xs font-mono whitespace-pre-wrap">
                                         <code>{snippet.code}</code>

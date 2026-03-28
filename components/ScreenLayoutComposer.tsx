@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import type { ScreenLayoutComposition, ScreenWidget, ScreenWidgetType } from '../types';
 import { generateScreenCode } from '../lib/screenCodeGenerator';
+import CopyButton from './CopyButton';
 
 interface ScreenLayoutComposerProps {
     composition: ScreenLayoutComposition;
@@ -802,7 +803,7 @@ const ScreenLayoutComposer: React.FC<ScreenLayoutComposerProps> = ({
 }) => {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [codeOpen, setCodeOpen] = useState(false);
-    const [copied, setCopied] = useState(false);
+
     const [dragState, setDragState] = useState<TreeDragState>({ draggingId: null, dropTarget: null });
     const [collapseGen, setCollapseGen] = useState(0);
     const [expandGen, setExpandGen] = useState(0);
@@ -874,11 +875,6 @@ const ScreenLayoutComposer: React.FC<ScreenLayoutComposerProps> = ({
     const aspectRatio = `${composition.gameWidth} / ${composition.gameHeight}`;
     const generatedCode = generateScreenCode(composition);
 
-    const handleCopy = () => {
-        navigator.clipboard.writeText(generatedCode);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
 
     return (
         <div className="h-full flex flex-col bg-primary text-primary overflow-hidden">
@@ -1110,16 +1106,7 @@ const ScreenLayoutComposer: React.FC<ScreenLayoutComposerProps> = ({
                             </svg>
                             <span className="text-xs font-bold text-secondary">Generated Code</span>
                         </div>
-                        <button onClick={handleCopy}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all
-                                ${copied
-                                    ? 'bg-green-500 text-white'
-                                    : 'bg-accent hover:bg-accent-hover text-white'}`}>
-                            {copied
-                                ? <><svg viewBox="0 0 12 12" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6l3 3 5-5"/></svg> Copied!</>
-                                : <><svg viewBox="0 0 12 12" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="4" y="1" width="7" height="8" rx="1"/><path d="M1 4v7h7"/></svg> Copy</>
-                            }
-                        </button>
+                        <CopyButton text={generatedCode} size="sm" label="Copy" />
                     </div>
                     <pre className="flex-grow overflow-auto p-3 text-xs font-mono text-primary bg-primary leading-relaxed">
                         {generatedCode}
