@@ -54,7 +54,7 @@ Key rules: `react-hooks/rules-of-hooks` (error), `react-hooks/exhaustive-deps` (
 
 ### Core Application State (App.tsx)
 
-`App.tsx` (~3.5K lines) is the central state hub. It manages all top-level state (blocks, groups, links, characters, variables, images, audio, screens, scenes, settings) using `useImmer` for immutable draft-based updates. State flows down via props; update callbacks are passed through the component hierarchy. Some state has been extracted into context providers (see Context Providers below).
+`App.tsx` (~3.5K lines) is the central state hub. It manages all top-level state (blocks, groups, links, characters, variables, images, audio, screens, scenes, imagemapCompositions, settings) using `useImmer` for immutable draft-based updates. State flows down via props; update callbacks are passed through the component hierarchy. Some state has been extracted into context providers (see Context Providers below).
 
 ### Key Data Model (types.ts)
 
@@ -63,13 +63,16 @@ Key rules: `react-hooks/rules-of-hooks` (error), `react-hooks/exhaustive-deps` (
 - **Block**: Represents a `.rpy` file with position, size, content, and filePath
 - **BlockGroup**: Groups blocks visually on the canvas
 - **Link**: Connection between blocks (from `jump`/`call` statements)
-- **EditorTab**: Open tab in the editor pane; `type` union includes `canvas`, `route-canvas`, `punchlist`, `editor`, `image`, `audio`, `character`, `scene-composer`, `ai-generator`, `stats`, `markdown`
-- **ProjectSettings**: Persisted per-project IDE state including split pane layout, open tabs, canvas transforms
+- **EditorTab**: Open tab in the editor pane; `type` union includes `canvas`, `route-canvas`, `punchlist`, `editor`, `image`, `audio`, `character`, `scene-composer`, `imagemap-composer`, `ai-generator`, `stats`, `markdown`. Tabs with `imagemap-composer` type carry an `imagemapId` property.
+- **ProjectSettings**: Persisted per-project IDE state including split pane layout, open tabs, canvas transforms, `sceneCompositions`, and `imagemapCompositions`
 - **AppSettings**: Global app preferences (theme, Ren'Py path, etc.)
 - **Character, Variable, ImageAsset, AudioAsset, Screen, Scene**: Story element types
 - **UserSnippet**: User-defined code snippet (id, title, prefix, description, code, optional monacoBody for placeholder support)
 - **ProjectLoadResult, ScanDirectoryResult**: Typed IPC return shapes (replacing prior `any` usage)
 - **SerializedSprite, SerializedSceneComposition**: JSON-safe versions of scene composer types
+- **ImageMapComposition**: Container for a clickable imagemap — ground image, optional hover overlay, and an array of hotspots. Persisted in `ProjectSettings.imagemapCompositions` (keyed by id) and saved to `project.ide.json`.
+- **ImageMapHotspot**: A single clickable region with `x`, `y`, `width`, `height`, an `ImageMapActionType` (`'jump' | 'call'`), and a target label
+- **SerializedImageMapComposition**: JSON-safe version of an imagemap composition
 
 ### Ren'Py Analysis Engine (hooks/useRenpyAnalysis.ts)
 
@@ -77,8 +80,8 @@ The largest source file (~25K lines). Regex-based parser that extracts labels, j
 
 ### Visual Canvas System
 
-- **StoryCanvas**: Main view — blocks as draggable rectangles with auto-drawn flow arrows
-- **RouteCanvas**: On-demand label-by-label control flow graph with route highlighting
+- **StoryCanvas**: Main view — blocks as draggable rectangles with auto-drawn `jump`/`call` flow arrows. Features: fit-to-screen button, character filter (hide non-player characters), role tinting (visual styling by character role), and a legend overlay.
+- **RouteCanvas**: Label-by-label control flow graph with route highlighting, unreachable label detection, call vs. jump arrow distinction, collapsible panel layout, route names/node roles display, hover-to-expand, fit-to-screen, and a menu inspector for route metadata.
 - Canvas coordinates use a transform system (pan via Shift+drag, zoom via scroll)
 
 ### Split Pane / Tab System
@@ -177,6 +180,23 @@ Users can create custom code snippets (persisted in `AppSettings.userSnippets`):
 ## AI Story Generator
 
 The app integrates AI APIs (Google Gemini via `@google/genai`, with optional OpenAI and Anthropic support via dynamic imports) for generating story content. API keys are encrypted at rest using Electron's `safeStorage`. The generator UI lives in `components/AIGenerator.tsx`.
+
+## ImageMap Composer
+
+`components/ImageMapComposer.tsx` provides a visual editor for creating Ren'Py `imagebutton`/`imagemap` screens with clickable hotspot regions:
+- Draw, resize, and manage hotspot rectangles over a ground image (with optional hover overlay image)
+- Each hotspot has an `ImageMapActionType` (`'jump' | 'call'`) and a target label
+- Ground and hover images are drag-dropped from the Image Assets panel only
+- Compositions are stored in `App.tsx` state as `imagemapCompositions: Record<string, ImageMapComposition>` and persisted in `ProjectSettings` (saved to `project.ide.json`)
+- Opened via the "Composers" tab in `StoryElementsPanel` (which groups both Scene Composer and ImageMap Composer entries; the tab count reflects `scenes.length + imagemaps.length`)
+
+## Statistics Dashboard
+
+`components/StatsView.tsx` provides a project analytics tab:
+- Word counts from dialogue and narration
+- Scene, route, character, and variable counts
+- Charts rendered via `recharts` (BarChart)
+- Opened as a `stats` editor tab
 
 ## CI/CD
 

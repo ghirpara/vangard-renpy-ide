@@ -1322,8 +1322,8 @@ const App: React.FC = () => {
               if (projectData.settings.imagemapCompositions) {
                   const restoredImagemaps: Record<string, ImageMapComposition> = {};
                   Object.entries(projectData.settings.imagemapCompositions).forEach(([id, im]) => {
-                      const groundImg = im.groundImage ? imagesMap.get((im.groundImage as any).filePath) : null;
-                      const hoverImg = im.hoverImage ? imagesMap.get((im.hoverImage as any).filePath) : null;
+                      const groundImg = im.groundImage ? imgMap.get((im.groundImage as any).filePath) : null;
+                      const hoverImg = im.hoverImage ? imgMap.get((im.hoverImage as any).filePath) : null;
                       restoredImagemaps[id] = {
                           screenName: im.screenName,
                           groundImage: groundImg || null,
