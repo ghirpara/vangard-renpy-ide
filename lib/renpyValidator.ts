@@ -57,6 +57,11 @@ const PYTHON_KEYWORDS = new Set([
 const PYTHON_BLOCK_RE =
   /^\s*(?:init\s+(?:-?\d+\s+)?)?python(?:\s+(?:hide|in\s+\w+))?:/;
 
+// Screen block start — `screen name(...):`
+// Inside screen blocks, `label` and `transform` are displayables, not story statements,
+// so colon-check and menu-choice rules must be suppressed.
+const SCREEN_BLOCK_RE = /^\s*screen\s+\w+(?:\s*\([^)]*\))?\s*:/;
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function indentOf(line: string): number {
@@ -204,7 +209,8 @@ function checkMissingColon(line: string, lineNum: number): RenpyDiagnostic | nul
 
   // init [offset] [python [...]] — no colon at end
   // Matches: init, init 5, init python, init 5 python, init python hide, etc.
-  if (/^\s*init\b/.test(line) && !line.trimEnd().endsWith(':')) {
+  // Excludes: `init offset = N` which is a valid assignment, not a block opener.
+  if (/^\s*init\b/.test(line) && !line.trimEnd().endsWith(':') && !/^\s*init\s+offset\b/.test(line)) {
     const [s, e] = wordRange(line, 'init');
     return makeDiag(lineNum, s, e,
       '`init` block is missing its colon.',
@@ -246,10 +252,17 @@ function checkMenuChoiceCondition(line: string, lineNum: number): RenpyDiagnosti
   const trimmed = line.trim();
   // Must start with a quoted string
   if (!trimmed.startsWith('"')) return null;
+  // Triple-quoted string delimiters (`"""`) are multi-line dialogue, not menu choices.
+  // The closing `"""` line would otherwise be parsed as an empty string "" + dangling ".
+  if (trimmed.startsWith('"""') || trimmed.startsWith("'''")) return null;
   const baseMatch = trimmed.match(/^"((?:[^"\\]|\\.)*)"(.*)/);
   if (!baseMatch) return null;
 
   const afterQuote = baseMatch[2].trim();
+
+  // Python dict key-value syntax: `"key" : value` — afterQuote starts with `:`.
+  // This is not a menu choice; skip to avoid false positives in multi-line define dicts.
+  if (afterQuote.startsWith(':')) return null;
 
   // If the line doesn't end with ':', check whether it has content after the quote.
   // "text" with no content after is narration — fine. "text" (something) with no colon is an error.
@@ -463,6 +476,9 @@ export function validateRenpyCode(code: string): RenpyDiagnostic[] {
   let inPythonBlock = false;
   let pythonBlockIndent = -1;
 
+  let inScreenBlock = false;
+  let screenBlockIndent = -1;
+
   lines.forEach((line, idx) => {
     const lineNum = idx + 1;
     const trimmed = line.trim();
@@ -483,11 +499,25 @@ export function validateRenpyCode(code: string): RenpyDiagnostic[] {
       }
     }
 
+    // Exit screen block when indentation returns to the opening level
+    if (inScreenBlock && indent <= screenBlockIndent) {
+      inScreenBlock = false;
+      screenBlockIndent = -1;
+      // Fall through — validate this line normally
+    }
+
     // Detect start of python block
     if (PYTHON_BLOCK_RE.test(line)) {
       inPythonBlock = true;
       pythonBlockIndent = indent;
       return;
+    }
+
+    // Detect start of screen block
+    if (SCREEN_BLOCK_RE.test(line)) {
+      inScreenBlock = true;
+      screenBlockIndent = indent;
+      // Still validate the `screen name:` line itself, then skip inner lines
     }
 
     // Inline Python expressions — run $ checks then skip all other rules
@@ -510,14 +540,18 @@ export function validateRenpyCode(code: string): RenpyDiagnostic[] {
     const def = checkDefineDefault(line, lineNum);
     if (def) diagnostics.push(def);
 
-    const colon = checkMissingColon(line, lineNum);
-    if (colon) diagnostics.push(colon);
+    // Inside screen blocks, `label`/`transform` are displayables and quoted strings
+    // are not menu choices — suppress these two rules to avoid false positives.
+    if (!inScreenBlock) {
+      const colon = checkMissingColon(line, lineNum);
+      if (colon) diagnostics.push(colon);
+
+      const choice = checkMenuChoiceCondition(line, lineNum);
+      if (choice) diagnostics.push(choice);
+    }
 
     const img = checkImageName(line, lineNum);
     if (img) diagnostics.push(img);
-
-    const choice = checkMenuChoiceCondition(line, lineNum);
-    if (choice) diagnostics.push(choice);
 
     const bare = checkBareStatements(line, lineNum);
     if (bare) diagnostics.push(bare);

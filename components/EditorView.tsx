@@ -13,6 +13,13 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { detectContext, getRenpyCompletions } from '../lib/renpyCompletionProvider';
 import type { RenpyCompletionData } from '../lib/renpyCompletionProvider';
 import { validateRenpyCode } from '../lib/renpyValidator';
+import { initTextMate, createTextMateTokensProvider } from '../lib/textmateGrammar';
+import {
+  getSemanticTokensLegend,
+  computeSemanticTokens,
+  SEMANTIC_DARK_RULES,
+  SEMANTIC_LIGHT_RULES,
+} from '../lib/renpySemanticTokens';
 import DialoguePreview from './DialoguePreview';
 import type { DialoguePreviewData, MenuChoice } from './DialoguePreview';
 
@@ -260,6 +267,12 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
   const blockRef = useRef(block);
   const onSwitchFocusBlockRef = useRef(onSwitchFocusBlock);
   const analysisResultRef = useRef(analysisResult);
+  // Emitter used to signal Monaco that semantic tokens should be refreshed.
+  // Created lazily when monaco is available (inside handleEditorWillMount).
+  const semanticTokensChangeEmitter = useRef<monaco.Emitter<void>>(null!);
+  if (semanticTokensChangeEmitter.current === null) {
+    semanticTokensChangeEmitter.current = new monaco.Emitter<void>();
+  }
   const onEditorUnmountRef = useRef(onEditorUnmount);
   const onCursorPositionChangeRef = useRef(onCursorPositionChange);
   const onContentChangeRef = useRef(onContentChange);
@@ -272,6 +285,8 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
     blockRef.current = block;
     onSwitchFocusBlockRef.current = onSwitchFocusBlock;
     analysisResultRef.current = analysisResult;
+    // Notify Monaco that semantic tokens may have changed
+    semanticTokensChangeEmitter.current.fire();
     onEditorUnmountRef.current = onEditorUnmount;
     onCursorPositionChangeRef.current = onCursorPositionChange;
     onContentChangeRef.current = onContentChange;
@@ -348,52 +363,188 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
         ],
       });
 
+      // TextMate tokenizer — loaded asynchronously (WASM init).
+      // Register a lightweight Monarch fallback first so the editor isn't
+      // un-highlighted while the WASM loads, then replace it with TextMate.
       monacoInstance.languages.setMonarchTokensProvider('renpy', {
-        keywords: ['label', 'jump', 'call', 'menu', 'scene', 'show', 'hide', 'with', 'define', 'default', 'python', 'init', 'if', 'elif', 'else', 'return', 'expression', 'pass', 'while', 'for', 'in', 'image', 'transform', 'screen', 'text', 'vbox', 'hbox', 'frame', 'button', 'bar', 'vpgrid', 'viewport'],
-        tokenizer: { 
-            root: [
-                [/#.*$/, 'comment'], 
-                [/"/, 'string', '@string_double'], 
-                [/'/, 'string', '@string_single'], 
-                [/\b(label|jump|call|menu|scene|show|hide|with|define|default|python|init|if|elif|else|return|expression|pass|while|for|in|image|transform|screen)\b/, 'keyword'],
-                [/\b[a-zA-Z_]\w*/, 'identifier'],
-                [/\b\d+/, 'number'], 
-                [/[:=+\-*/!<>]+/, 'operator'], 
-                [/[(),.]/, 'punctuation']
-            ], 
-            string_double: [[/[^\\"]+/, 'string'], [/\\./, 'string.escape'], [/"/, 'string', '@pop']], 
-            string_single: [[/[^\\']+/, 'string'], [/\\./, 'string.escape'], [/'/, 'string', '@pop']] 
+        tokenizer: {
+          root: [
+            [/#.*$/, 'comment'],
+            [/"/, 'string', '@string_double'],
+            [/'/, 'string', '@string_single'],
+            [/\b(label|jump|call|menu|scene|show|hide|with|define|default|python|init|if|elif|else|return|expression|pass|while|for|in|image|transform|screen)\b/, 'keyword'],
+            [/\b[a-zA-Z_]\w*/, 'identifier'],
+            [/\b\d+/, 'number'],
+            [/[:=+\-*/!<>]+/, 'operator'],
+          ],
+          string_double: [[/[^\\"]+/, 'string'], [/\\./, 'string.escape'], [/"/, 'string', '@pop']],
+          string_single: [[/[^\\']+/, 'string'], [/\\./, 'string.escape'], [/'/, 'string', '@pop']],
         },
       });
-      
-      monacoInstance.editor.defineTheme('renpy-dark', { 
-          base: 'vs-dark', 
-          inherit: true, 
-          rules: [
-              { token: 'keyword', foreground: 'C678DD' }, // Purple
-              { token: 'string', foreground: '98C379' }, // Green
-              { token: 'comment', foreground: '5C6370', fontStyle: 'italic' }, // Grey
-              { token: 'number', foreground: 'D19A66' }, // Orange
-              { token: 'identifier', foreground: 'ABB2BF' }, // White/Grey
-              { token: 'operator', foreground: '56B6C2' }, // Cyan
-              { token: 'punctuation', foreground: 'ABB2BF' }
-          ], 
-          colors: { 'editor.background': '#282C34' } 
+
+      // Kick off async TextMate init — when ready, replace the Monarch tokenizer
+      initTextMate().then(() => {
+        const provider = createTextMateTokensProvider();
+        monacoInstance.languages.setTokensProvider('renpy', provider);
+        // Re-tokenize any open models so TextMate colours take effect immediately
+        for (const model of monacoInstance.editor.getModels()) {
+          if (model.getLanguageId() === 'renpy') {
+            // Force Monaco to re-tokenize by touching the language
+            monacoInstance.editor.setModelLanguage(model, 'renpy');
+          }
+        }
+      }).catch((err) => {
+        console.error('TextMate init failed, keeping Monarch fallback:', err);
       });
-      
-      monacoInstance.editor.defineTheme('renpy-light', { 
-          base: 'vs', 
-          inherit: true, 
+
+      // ------------------------------------------------------------------
+      // Themes — rules use TextMate scope names (dotted, most-specific).
+      // Monaco does prefix matching so `keyword` matches any
+      // `keyword.declaration.*`, `keyword.control.*`, etc.
+      // ------------------------------------------------------------------
+      monacoInstance.editor.defineTheme('renpy-dark', {
+          base: 'vs-dark',
+          inherit: true,
           rules: [
-              { token: 'keyword', foreground: 'A626A4' }, 
-              { token: 'string', foreground: '50A14F' }, 
-              { token: 'comment', foreground: 'A0A1A7', fontStyle: 'italic' }, 
-              { token: 'number', foreground: '986801' }, 
-              { token: 'identifier', foreground: '383A42' }, 
-              { token: 'operator', foreground: '0184BC' }, 
-              { token: 'punctuation', foreground: '383A42' }
-          ], 
+              // ---- Keywords ----
+              { token: 'keyword.declaration', foreground: 'C678DD', fontStyle: 'bold' }, // define, default, label, screen, transform, image, init, python, style, translate
+              { token: 'keyword.control', foreground: 'C678DD' },       // jump, call, return, menu, if, elif, else, while, for, pass, in, not, and, or
+              { token: 'keyword.statement', foreground: 'C678DD' },     // show, hide, scene, with, play, stop, queue, voice, pause, window, nvl
+              { token: 'keyword.operator', foreground: '56B6C2' },      // =, +=, etc.
+              { token: 'keyword.other', foreground: 'C678DD' },         // expression, screen (after call), early, hide modifier, show/hide/auto
+              { token: 'keyword', foreground: 'C678DD' },               // fallback
+
+              // ---- Entity names ----
+              { token: 'entity.name.function.label', foreground: '61AFEF', fontStyle: 'bold' },      // label names
+              { token: 'entity.name.function.screen', foreground: '61AFEF' },     // screen names
+              { token: 'entity.name.function.transform', foreground: '61AFEF' },  // transform names
+              { token: 'entity.name.function.label.reference', foreground: '61AFEF', fontStyle: 'underline' }, // jump/call targets
+              { token: 'entity.name.function.screen.reference', foreground: '61AFEF', fontStyle: 'underline' }, // call screen targets
+              { token: 'entity.name.variable', foreground: 'E06C75' },  // defined variable names
+              { token: 'entity.name.tag.character', foreground: 'E5C07B', fontStyle: 'bold' }, // character names in dialogue
+              { token: 'entity.name.tag.image', foreground: '98C379' }, // image names after show/scene/hide
+              { token: 'entity.name.tag', foreground: 'E5C07B' },      // other tags (language, style)
+
+              // ---- Strings ----
+              { token: 'string.quoted.double', foreground: '98C379' },
+              { token: 'string.quoted.single', foreground: '98C379' },
+              { token: 'string', foreground: '98C379' },
+              { token: 'constant.character.escape', foreground: 'D19A66' },
+              { token: 'meta.interpolation', foreground: 'E5C07B' },          // [variable] inside strings
+              { token: 'source.python.embedded', foreground: 'E5C07B' },      // inside interpolation
+              { token: 'constant.other.placeholder.tag', foreground: '56B6C2' }, // {b}, {i}, {color=...} etc.
+
+              // ---- Literals ----
+              { token: 'constant.numeric', foreground: 'D19A66' },
+              { token: 'constant.language.boolean', foreground: 'D19A66' },
+              { token: 'constant.language.none', foreground: 'D19A66' },
+
+              // ---- Support (builtins) ----
+              { token: 'support.class.builtin', foreground: 'E5C07B' },         // Character, Dissolve, renpy, config, etc.
+              { token: 'support.function.screen', foreground: '56B6C2' },        // text, vbox, hbox, button, etc.
+              { token: 'support.function.atl', foreground: '56B6C2' },           // ease, linear, xpos, alpha, etc.
+              { token: 'support.constant.transition', foreground: 'D19A66' },    // dissolve, fade, etc. after with
+              { token: 'support.constant.channel', foreground: 'D19A66' },       // music, sound, audio channels
+
+              // ---- Python ----
+              { token: 'meta.embedded.inline.python', foreground: 'ABB2BF' },
+              { token: 'punctuation.definition.variable.python', foreground: 'E06C75', fontStyle: 'bold' }, // $ prefix
+              { token: 'keyword.other.python', foreground: 'C678DD' },
+
+              // ---- Comments ----
+              { token: 'comment', foreground: '5C6370', fontStyle: 'italic' },
+
+              // ---- Misc ----
+              { token: 'variable.parameter', foreground: 'E06C75' },
+              { token: 'variable.other', foreground: 'ABB2BF' },
+              { token: 'punctuation.section.block.begin', foreground: 'ABB2BF' },
+              { token: 'source.renpy', foreground: 'ABB2BF' },
+
+              // ---- Semantic token overrides ----
+              ...SEMANTIC_DARK_RULES,
+          ],
+          colors: { 'editor.background': '#282C34' }
+      });
+
+      monacoInstance.editor.defineTheme('renpy-light', {
+          base: 'vs',
+          inherit: true,
+          rules: [
+              // ---- Keywords ----
+              { token: 'keyword.declaration', foreground: 'A626A4', fontStyle: 'bold' },
+              { token: 'keyword.control', foreground: 'A626A4' },
+              { token: 'keyword.statement', foreground: 'A626A4' },
+              { token: 'keyword.operator', foreground: '0184BC' },
+              { token: 'keyword.other', foreground: 'A626A4' },
+              { token: 'keyword', foreground: 'A626A4' },
+
+              // ---- Entity names ----
+              { token: 'entity.name.function.label', foreground: '4078F2', fontStyle: 'bold' },
+              { token: 'entity.name.function.screen', foreground: '4078F2' },
+              { token: 'entity.name.function.transform', foreground: '4078F2' },
+              { token: 'entity.name.function.label.reference', foreground: '4078F2', fontStyle: 'underline' },
+              { token: 'entity.name.function.screen.reference', foreground: '4078F2', fontStyle: 'underline' },
+              { token: 'entity.name.variable', foreground: 'E45649' },
+              { token: 'entity.name.tag.character', foreground: 'C18401', fontStyle: 'bold' },
+              { token: 'entity.name.tag.image', foreground: '50A14F' },
+              { token: 'entity.name.tag', foreground: 'C18401' },
+
+              // ---- Strings ----
+              { token: 'string.quoted.double', foreground: '50A14F' },
+              { token: 'string.quoted.single', foreground: '50A14F' },
+              { token: 'string', foreground: '50A14F' },
+              { token: 'constant.character.escape', foreground: '986801' },
+              { token: 'meta.interpolation', foreground: 'C18401' },
+              { token: 'source.python.embedded', foreground: 'C18401' },
+              { token: 'constant.other.placeholder.tag', foreground: '0184BC' },
+
+              // ---- Literals ----
+              { token: 'constant.numeric', foreground: '986801' },
+              { token: 'constant.language.boolean', foreground: '986801' },
+              { token: 'constant.language.none', foreground: '986801' },
+
+              // ---- Support (builtins) ----
+              { token: 'support.class.builtin', foreground: 'C18401' },
+              { token: 'support.function.screen', foreground: '0184BC' },
+              { token: 'support.function.atl', foreground: '0184BC' },
+              { token: 'support.constant.transition', foreground: '986801' },
+              { token: 'support.constant.channel', foreground: '986801' },
+
+              // ---- Python ----
+              { token: 'meta.embedded.inline.python', foreground: '383A42' },
+              { token: 'punctuation.definition.variable.python', foreground: 'E45649', fontStyle: 'bold' },
+              { token: 'keyword.other.python', foreground: 'A626A4' },
+
+              // ---- Comments ----
+              { token: 'comment', foreground: 'A0A1A7', fontStyle: 'italic' },
+
+              // ---- Misc ----
+              { token: 'variable.parameter', foreground: 'E45649' },
+              { token: 'variable.other', foreground: '383A42' },
+              { token: 'punctuation.section.block.begin', foreground: '383A42' },
+              { token: 'source.renpy', foreground: '383A42' },
+
+              // ---- Semantic token overrides ----
+              ...SEMANTIC_LIGHT_RULES,
+          ],
           colors: { 'editor.background': '#FAFAFA' }
+      });
+
+      // Register semantic tokens provider — enriches highlighting with
+      // live analysis data (known vs. unknown labels, characters, etc.)
+      monacoInstance.languages.registerDocumentSemanticTokensProvider('renpy', {
+        onDidChange: semanticTokensChangeEmitter.current.event,
+        getLegend: getSemanticTokensLegend,
+        provideDocumentSemanticTokens(model) {
+          const analysis = analysisResultRef.current;
+          // Skip until analysis has run at least once
+          if (Object.keys(analysis.labels).length === 0 && analysis.characters.size === 0) {
+            return { data: new Uint32Array(0) };
+          }
+          const data = computeSemanticTokens(model.getValue(), analysis);
+          return { data };
+        },
+        releaseDocumentSemanticTokens() { /* nothing to dispose */ },
       });
 
       // Register context-aware completion provider
@@ -965,7 +1116,8 @@ const EditorView: React.FC<EditorViewProps> = (props) => {
             hover: {
                 enabled: true,
                 delay: 300,
-            }
+            },
+            'semanticHighlighting.enabled': true,
           }}
         />
       </div>

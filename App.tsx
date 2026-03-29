@@ -22,7 +22,8 @@ import SceneComposer from './components/SceneComposer';
 import ImageMapComposer from './components/ImageMapComposer';
 import ScreenLayoutComposer from './components/ScreenLayoutComposer';
 import MarkdownPreviewView from './components/MarkdownPreviewView';
-import PunchlistManager from './components/PunchlistManager';
+import DiagnosticsPanel from './components/DiagnosticsPanel';
+import { useDiagnostics, migratePunchlistToTasks } from './hooks/useDiagnostics';
 import TabContextMenu from './components/TabContextMenu';
 import Sash from './components/Sash';
 import StatusBar from './components/StatusBar';
@@ -38,7 +39,7 @@ import type {
   Block, BlockGroup, Link, Position, FileSystemTreeNode, EditorTab,
   ToastMessage, IdeSettings, Theme, ProjectImage, RenpyAudio,
   ClipboardState, ImageMetadata, AudioMetadata, LabelNode, Character,
-  AppSettings, ProjectSettings, StickyNote, SceneComposition, SceneSprite, ImageMapComposition, ScreenLayoutComposition, PunchlistMetadata, MouseGestureSettings,
+  AppSettings, ProjectSettings, StickyNote, SceneComposition, SceneSprite, ImageMapComposition, ScreenLayoutComposition, PunchlistMetadata, DiagnosticsTask, MouseGestureSettings,
   ProjectLoadResult, ScannedImageAsset, ScannedAudioAsset, SerializedSprite, SerializedSceneComposition, UserSnippet
 } from './types';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
@@ -383,8 +384,10 @@ const App: React.FC = () => {
   // Screen Layout Composer State
   const [screenLayoutCompositions, setScreenLayoutCompositions] = useImmer<Record<string, ScreenLayoutComposition>>({});
 
-  // Punchlist State
+  // Punchlist State (kept for migration — not written on save)
   const [punchlistMetadata, setPunchlistMetadata] = useImmer<Record<string, PunchlistMetadata>>({});
+  // Diagnostics Tasks State
+  const [diagnosticsTasks, setDiagnosticsTasks] = useImmer<DiagnosticsTask[]>([]);
   
   const [dirtyBlockIds, setDirtyBlockIds] = useState<Set<string>>(new Set());
   const [dirtyEditors, setDirtyEditors] = useState<Set<string>>(new Set()); // Blocks modified in editor but not synced to block state yet
@@ -458,6 +461,7 @@ const App: React.FC = () => {
 
   // --- Analysis ---
   const analysisResult = useRenpyAnalysis(blocks, 0); // 0 is a trigger for force re-analysis if needed
+  const diagnosticsResult = useDiagnostics(blocks, analysisResult, images, imageMetadata, audios, audioMetadata);
   
   // --- Refs ---
   const editorInstances = useRef<Map<string, monaco.editor.IStandaloneCodeEditor>>(new Map());
@@ -1226,7 +1230,7 @@ const App: React.FC = () => {
   }, [blocks, analysisResult, handleTidyUp]);
 
   // --- Tab Management Helpers ---
-  const handleOpenStaticTab = useCallback((type: 'canvas' | 'route-canvas' | 'punchlist' | 'ai-generator' | 'stats') => {
+  const handleOpenStaticTab = useCallback((type: 'canvas' | 'route-canvas' | 'diagnostics' | 'ai-generator' | 'stats') => {
         const id = type;
         // If already open in primary, activate it there
         if (openTabs.find(t => t.id === id)) {
@@ -1355,6 +1359,14 @@ const App: React.FC = () => {
               setStickyNotes(projectData.settings.stickyNotes || []);
               setCharacterProfiles(projectData.settings.characterProfiles || {});
               setPunchlistMetadata(projectData.settings.punchlistMetadata || {});
+              // Diagnostics tasks — migrate from old punchlist metadata if needed
+              if (projectData.settings.diagnosticsTasks) {
+                setDiagnosticsTasks(projectData.settings.diagnosticsTasks);
+              } else if (projectData.settings.punchlistMetadata) {
+                setDiagnosticsTasks(migratePunchlistToTasks(projectData.settings.punchlistMetadata));
+              } else {
+                setDiagnosticsTasks([]);
+              }
               
               // Load Scene Compositions
               // Helper to link saved paths back to loaded image objects
@@ -1521,7 +1533,7 @@ const App: React.FC = () => {
                   if (tab.type === 'markdown' && tab.filePath) {
                       return true; // File existence checked on tab render
                   }
-                  return tab.type === 'canvas' || tab.type === 'route-canvas' || tab.type === 'punchlist' || tab.type === 'ai-generator' || tab.type === 'stats';
+                  return tab.type === 'canvas' || tab.type === 'route-canvas' || tab.type === 'punchlist' || tab.type === 'diagnostics' || tab.type === 'ai-generator' || tab.type === 'stats';
               });
 
               const rehydratedTabs = validTabs.map(tab => {
@@ -1530,6 +1542,10 @@ const App: React.FC = () => {
                       if (matchingBlock) {
                           return { ...tab, id: matchingBlock.id, blockId: matchingBlock.id };
                       }
+                  }
+                  // Migrate old punchlist tab to diagnostics
+                  if (tab.type === 'punchlist' || tab.id === 'punchlist') {
+                      return { ...tab, type: 'diagnostics' as const, id: 'diagnostics' };
                   }
                   // Migrate old single scene tab
                   if (tab.type === 'scene-composer' && !tab.sceneId) {
@@ -1552,7 +1568,7 @@ const App: React.FC = () => {
                   if (tab.type === 'audio' && tab.filePath) return audioMap.has(tab.filePath);
                   if (tab.type === 'character' && tab.characterTag) return tempAnalysis.characters.has(tab.characterTag);
                   if (tab.type === 'markdown' && tab.filePath) return true;
-                  return tab.type === 'canvas' || tab.type === 'route-canvas' || tab.type === 'punchlist' || tab.type === 'ai-generator' || tab.type === 'stats' || tab.type === 'scene-composer';
+                  return tab.type === 'canvas' || tab.type === 'route-canvas' || tab.type === 'punchlist' || tab.type === 'diagnostics' || tab.type === 'ai-generator' || tab.type === 'stats' || tab.type === 'scene-composer';
               });
               setSplitLayout(validSecondary.length > 0 ? savedSplitLayout : 'none');
               setSplitPrimarySize(projectData.settings.splitPrimarySize ?? 600);
@@ -1933,6 +1949,7 @@ const App: React.FC = () => {
         stickyNotes: Array.from(stickyNotes),
         characterProfiles,
         punchlistMetadata,
+        diagnosticsTasks,
         sceneCompositions: serializableScenes as unknown as Record<string, SceneComposition>,
         sceneNames,
         imagemapCompositions: serializableImagemaps,
@@ -1947,7 +1964,7 @@ const App: React.FC = () => {
       console.error("Failed to save IDE settings:", e);
       addToast('Failed to save workspace settings', 'error');
     }
-  }, [projectRootPath, projectSettings, openTabs, activeTabId, splitLayout, splitPrimarySize, secondaryOpenTabs, secondaryActiveTabId, stickyNotes, characterProfiles, addToast, sceneCompositions, sceneNames, imagemapCompositions, screenLayoutCompositions, imageScanDirectories, audioScanDirectories, punchlistMetadata]);
+  }, [projectRootPath, projectSettings, openTabs, activeTabId, splitLayout, splitPrimarySize, secondaryOpenTabs, secondaryActiveTabId, stickyNotes, characterProfiles, addToast, sceneCompositions, sceneNames, imagemapCompositions, screenLayoutCompositions, imageScanDirectories, audioScanDirectories, punchlistMetadata, diagnosticsTasks]);
 
 
   const handleSaveAll = useCallback(async () => {
@@ -2796,7 +2813,7 @@ const App: React.FC = () => {
             if (data.command === 'save-all') handleSaveAll();
             if (data.command === 'run-project' && projectRootPath) window.electronAPI?.runGame(appSettings.renpyPath, projectRootPath);
             if (data.command === 'stop-project') window.electronAPI?.stopGame();
-            if (data.command === 'open-static-tab' && data.type) handleOpenStaticTab(data.type as 'canvas' | 'route-canvas' | 'punchlist' | 'ai-generator');
+            if (data.command === 'open-static-tab' && data.type) handleOpenStaticTab(data.type as 'canvas' | 'route-canvas' | 'diagnostics' | 'ai-generator');
             if (data.command === 'toggle-search') handleToggleSearch();
             if (data.command === 'open-settings') setSettingsModalOpen(true);
             if (data.command === 'open-shortcuts') setShortcutsModalOpen(true);
@@ -2902,7 +2919,7 @@ const App: React.FC = () => {
   const getTabLabel = (tab: EditorTab): React.ReactNode => {
     if (tab.id === 'canvas') return 'Story Canvas';
     if (tab.id === 'route-canvas') return 'Route Canvas';
-    if (tab.id === 'punchlist') return 'Punchlist';
+    if (tab.id === 'diagnostics' || tab.id === 'punchlist') return 'Diagnostics';
     if (tab.id === 'stats') return 'Stats';
     if (tab.type === 'ai-generator') return 'AI Generator';
     if (tab.type === 'scene-composer') return sceneNames[tab.sceneId!] || 'Scene';
@@ -2939,12 +2956,12 @@ const App: React.FC = () => {
         mouseGestures={appSettings.mouseGestures}
       />;
     }
-    if (tab.type === 'punchlist') {
-      return <PunchlistManager
-        blocks={blocks} stickyNotes={stickyNotes} analysisResult={analysisResult}
-        projectImages={images} imageMetadata={imageMetadata} projectAudios={audios} audioMetadata={audioMetadata}
-        punchlistMetadata={punchlistMetadata}
-        onUpdateMetadata={(id, data) => { setPunchlistMetadata(draft => { if (data === undefined) { delete draft[id]; } else { draft[id] = { ...draft[id], ...data }; } }); setHasUnsavedSettings(true); }}
+    if (tab.type === 'diagnostics' || tab.type === 'punchlist') {
+      return <DiagnosticsPanel
+        diagnostics={diagnosticsResult}
+        blocks={blocks} stickyNotes={stickyNotes}
+        tasks={diagnosticsTasks}
+        onUpdateTasks={(updated) => { setDiagnosticsTasks(updated); setHasUnsavedSettings(true); }}
         onOpenBlock={handleOpenEditor} onHighlightBlock={(id) => handleCenterOnBlock(id)}
       />;
     }
@@ -2955,7 +2972,15 @@ const App: React.FC = () => {
       />;
     }
     if (tab.id === 'stats') {
-      return <StatsView blocks={blocks} analysisResult={analysisResult} routeAnalysisResult={routeAnalysisResult} />;
+      return <StatsView
+        blocks={blocks}
+        analysisResult={analysisResult}
+        routeAnalysisResult={routeAnalysisResult}
+        imageCount={images.size}
+        audioCount={audios.size}
+        diagnosticsErrorCount={diagnosticsResult.errorCount}
+        onOpenDiagnostics={() => handleOpenStaticTab('diagnostics')}
+      />;
     }
     if (tab.type === 'editor' && tab.blockId) {
       const block = blocks.find(b => b.id === tab.blockId);
@@ -3080,6 +3105,11 @@ const App: React.FC = () => {
             onContextMenu={(e) => handleTabContextMenu(e, tab.id, paneId)}
           >
             <span className="truncate flex-grow">{getTabLabel(tab)}</span>
+            {(tab.id === 'diagnostics' || tab.id === 'punchlist') && diagnosticsResult.errorCount > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold bg-red-500 text-white rounded-full min-w-[18px] text-center flex-none">
+                {diagnosticsResult.errorCount}
+              </span>
+            )}
             {tab.id !== 'canvas' && (
               <button onClick={(e) => handleCloseTab(tab.id, paneId, e)} aria-label="Close tab" className="ml-2 opacity-0 group-hover:opacity-100 hover:text-red-500 rounded-full p-0.5">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
@@ -3161,7 +3191,8 @@ const App: React.FC = () => {
         requestOpenFolder={handleOpenProjectFolder}
         handleSave={handleSaveAll}
         onOpenSettings={() => setSettingsModalOpen(true)}
-        onOpenStaticTab={handleOpenStaticTab as (type: 'canvas' | 'route-canvas' | 'stats') => void}
+        onOpenStaticTab={handleOpenStaticTab as (type: 'canvas' | 'route-canvas' | 'stats' | 'diagnostics') => void}
+        diagnosticsErrorCount={diagnosticsResult.errorCount}
         onAddStickyNote={() => addStickyNote()}
         isGameRunning={isGameRunning}
         onRunGame={() => window.electronAPI?.runGame(appSettings.renpyPath, projectRootPath!)}

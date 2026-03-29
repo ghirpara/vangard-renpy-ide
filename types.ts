@@ -120,6 +120,43 @@ export interface PunchlistMetadata {
   status?: 'open' | 'completed' | 'ignored';
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostics types
+// ---------------------------------------------------------------------------
+
+export type DiagnosticSeverity = 'error' | 'warning' | 'info';
+
+export interface DiagnosticIssue {
+  id: string;               // deterministic: "category:blockId:line" or "category:name"
+  severity: DiagnosticSeverity;
+  category: string;         // "invalid-jump" | "syntax" | "missing-image" | "missing-audio"
+                            // | "undefined-character" | "undefined-screen"
+                            // | "unused-character" | "unreachable-label"
+  message: string;
+  blockId?: string;
+  filePath?: string;
+  line?: number;
+  column?: number;
+}
+
+export interface DiagnosticsTask {
+  id: string;               // crypto.randomUUID()
+  title: string;
+  description?: string;
+  status: 'open' | 'completed';
+  blockId?: string;         // optional link to a file
+  line?: number;
+  stickyNoteId?: string;    // if derived from a canvas sticky note
+  createdAt: number;        // Date.now()
+}
+
+export interface DiagnosticsResult {
+  issues: DiagnosticIssue[];
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+}
+
 /**
  * Represents a Ren'Py Character definition extracted from code.
  * Includes standard Character() parameters and custom extensions for styling.
@@ -530,7 +567,7 @@ export interface RenpyAnalysisResult {
  */
 export interface EditorTab {
   id: string;
-  type: 'canvas' | 'route-canvas' | 'punchlist' | 'editor' | 'image' | 'audio' | 'character' | 'scene-composer' | 'imagemap-composer' | 'screen-layout-composer' | 'ai-generator' | 'stats' | 'markdown';
+  type: 'canvas' | 'route-canvas' | 'punchlist' | 'diagnostics' | 'editor' | 'image' | 'audio' | 'character' | 'scene-composer' | 'imagemap-composer' | 'screen-layout-composer' | 'ai-generator' | 'stats' | 'markdown';
   blockId?: string;
   filePath?: string;
   characterTag?: string;
@@ -791,6 +828,7 @@ export interface ProjectSettings {
   stickyNotes?: StickyNote[];
   characterProfiles?: Record<string, string>;
   punchlistMetadata?: Record<string, PunchlistMetadata>;
+  diagnosticsTasks?: DiagnosticsTask[];
   sceneCompositions?: Record<string, SceneComposition>;
   sceneNames?: Record<string, string>;
   imagemapCompositions?: Record<string, ImageMapComposition>;
@@ -806,7 +844,7 @@ export interface ProjectSettings {
  * @extends AppSettings
  * @extends Omit<ProjectSettings, 'openTabs' | 'activeTabId' | 'stickyNotes' | 'characterProfiles' | 'punchlistMetadata' | 'sceneCompositions' | 'sceneNames' | 'scannedImagePaths' | 'scannedAudioPaths'>
  */
-export interface IdeSettings extends AppSettings, Omit<ProjectSettings, 'openTabs' | 'activeTabId' | 'stickyNotes' | 'characterProfiles' | 'punchlistMetadata' | 'sceneCompositions' | 'sceneNames' | 'scannedImagePaths' | 'scannedAudioPaths'> {}
+export interface IdeSettings extends AppSettings, Omit<ProjectSettings, 'openTabs' | 'activeTabId' | 'stickyNotes' | 'characterProfiles' | 'punchlistMetadata' | 'diagnosticsTasks' | 'sceneCompositions' | 'sceneNames' | 'scannedImagePaths' | 'scannedAudioPaths'> {}
 
 /**
  * Represents the current clipboard state for cut/copy operations in the file explorer.
